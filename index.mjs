@@ -20,6 +20,25 @@ export function apply(ctx) {
     return []
   }
 
+  // 修复模型 JSON 的经典毛病：字符串内未转义的换行/回车/Tab
+  function repairJson(text) {
+    let out = ''
+    let inStr = false
+    let esc = false
+    for (const ch of String(text)) {
+      if (esc) { out += ch; esc = false; continue }
+      if (ch === '\\') { out += ch; esc = true; continue }
+      if (ch === '"') { inStr = !inStr; out += ch; continue }
+      if (inStr) {
+        if (ch === '\n') { out += '\\n'; continue }
+        if (ch === '\r') { out += '\\r'; continue }
+        if (ch === '\t') { out += '\\t'; continue }
+      }
+      out += ch
+    }
+    return out
+  }
+
   function parseJson(text) {
     let cleaned = String(text).trim()
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
@@ -27,10 +46,11 @@ export function apply(ctx) {
     const start = cleaned.indexOf('{')
     const end = cleaned.lastIndexOf('}')
     if (start >= 0 && end > start) attempts.push(cleaned.slice(start, end + 1))
-    for (const candidate of attempts) {
-      try { return JSON.parse(candidate) } catch (error) { /* keep going */ }
-      // 常见模型输出毛病：数组/对象末尾的尾随逗号
-      try { return JSON.parse(candidate.replace(/,\s*([}\]])/g, '$1')) } catch (error) { /* keep going */ }
+    for (const raw of attempts) {
+      const repaired = repairJson(raw)
+      for (const candidate of [raw, repaired, raw.replace(/,\s*([}\]])/g, '$1'), repaired.replace(/,\s*([}\]])/g, '$1')]) {
+        try { return JSON.parse(candidate) } catch (error) { /* keep going */ }
+      }
     }
     return null
   }
@@ -124,16 +144,23 @@ export function apply(ctx) {
 
   // 带重试的 JSON 调用：解析失败时追加校正提示重试（最多 2 次重试）
   async function callModelJson(cfg, system, userText, maxTokens) {
-    let lastParsed = null
+    let lastRaw = ''
     let prompt = userText
     for (let attempt = 0; attempt < 3; attempt++) {
-      const text = await callModel(cfg, system, prompt, maxTokens)
+      let text = ''
+      try {
+        text = await callModel(cfg, system, prompt, maxTokens)
+      } catch (err) {
+        // 空结果等一次调用失败：进入校正重试，而不是一击即溃
+        text = ''
+      }
+      lastRaw = text
       const parsed = parseJson(text)
       if (parsed !== null) return parsed
-      lastParsed = parsed
-      prompt = userText + '\n\n[系统校正] 你上一次的输出无法解析为 JSON（可能混入了解释文字、Markdown 围栏或尾随逗号）。请重新只输出一个合法的 JSON 对象，不要任何解释或额外文字，字符串内引号正确转义，末尾不要有逗号。'
+      prompt = userText + '\n\n[系统校正] 你上一次的输出为空或无法解析为 JSON（可能混入了解释文字、Markdown 围栏、尾随逗号，或字符串内直接换行）。请重新只输出一个合法的 JSON 对象：不要任何解释或额外文字，字符串内不要直接换行（多行文本用 \\n 转义），引号正确转义，末尾不要有逗号。'
     }
-    return lastParsed
+    const shown = String(lastRaw).slice(0, 200)
+    throw new Error('模型输出无法解析为 JSON（已重试 3 次）。' + (shown.trim() === '' ? '三次输出均为空。' : '输出片段：' + shown))
   }
   }
 
