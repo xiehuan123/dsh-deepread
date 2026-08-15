@@ -23,7 +23,7 @@ const urlCacheRecord = z.object({
 })
 
 const deepreadCacheDomainSpec = defineDomain({
-  name: 'deepread-url-cache',
+  name: 'deepread_url_cache',
   version: 1,
   tables: { articles: domainTable(z.string(), urlCacheRecord) },
 })

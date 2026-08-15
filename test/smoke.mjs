@@ -28,7 +28,7 @@ const storageDomainDir = join(scope, 'dsh-storage-domain')
 await mkdir(storageDomainDir, { recursive: true })
 await writeFile(join(storageDomainDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-storage-domain', type: 'module', main: 'index.js' }))
 await writeFile(join(storageDomainDir, 'index.js'), [
-  'export function defineDomain(spec){ return spec }',
+  'export function defineDomain(spec){ if (!/^[a-z][a-z0-9_]*$/.test(spec.name)) throw new Error(\'domain name must match [a-z][a-z0-9_]*\'); return spec }',
   'export function domainTable(keySchema, recordSchema){ return { keySchema, recordSchema } }',
   '',
 ].join('\n'))

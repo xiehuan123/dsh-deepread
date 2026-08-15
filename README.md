@@ -113,7 +113,7 @@ npx skills@latest add xiehuan123/dsh-deepread      # 或 skills.sh
 
 ## 全文缓存
 
-URL 抓取的全文按官方 storageDomain 约定落盘：`deepread-url-cache` 领域（版本 1，zod schema
+URL 抓取的全文按官方 storageDomain 约定落盘：`deepread_url_cache` 领域（版本 1，zod schema
 校验，记录含 `url`/`text`/`fetchedAt`），存于 `$DSH_HOME/storages/`，跨进程重启仍然有效。
 同一篇文章换模式（deep→map/feynman/book）直接复用缓存、不再联网；抓取失败时自动回退缓存并
 在报告中注明。TTL 默认 7 天，条目上限 200（写入时惰性清理过期项）。未挂载 storage 的
