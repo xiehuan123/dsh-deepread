@@ -18,12 +18,26 @@
 
 ## 安装
 
+### DeepSeek Harness（工具 + Web UI，完整功能）
+
 ```sh
 # git 源安装（构建产物已入库）
 dsh plugin --profile web add "github:xiehuan123/dsh-deepread"
 ```
 
 重启 dsh web 后生效。输入区上方出现「📖 精读」工具条，对话中也可直接说「用知识地图模式精读这篇文章：<内容>」。
+
+### Codex / Claude Code（skill 形态，零依赖）
+
+```bash
+# Claude Code / Codex 官方插件方式
+claude plugin install xiehuan123/dsh-deepread
+# 或会话内：/plugin install xiehuan123/dsh-deepread
+# 或 skills.sh
+npx skills@latest add xiehuan123/dsh-deepread
+```
+
+安装后 Codex/Claude 直接可用：说「用费曼读书法精读这本书」即可触发 `deepread` skill——agent 会用自身的读文件/抓网页能力执行五种模式（知识地图模板与费曼 11 步见 `skills/deepread/references/`）。
 
 ## 使用示例
 
@@ -40,7 +54,7 @@ dsh plugin --profile web add "github:xiehuan123/dsh-deepread"
 | `url` | string | 微信公众号稳定链接（仅 mp.weixin.qq.com；知乎/掘金等反爬站点请粘贴正文） |
 | `path` | string | 工作区文件路径（.txt/.md/.markdown/.html/.pdf） |
 | `text` | string | 粘贴文本 |
-| `depth` | enum | `quick` / `deep`（默认）/ `map` / `book` |
+| `depth` | enum | `quick` / `deep`（默认）/ `map` / `feynman` / `book` |
 | `export` | enum | `none`（默认，仅会话展示）/ `md` / `mm` / `html` / `all` |
 | `focus` | string | 读者关注角度，如「论证逻辑」「研究方法」 |
 | `language` | enum | `zh` / `en` / `auto`（默认） |
@@ -48,10 +62,12 @@ dsh plugin --profile web add "github:xiehuan123/dsh-deepread"
 ## 仓库结构
 
 ```
-├── package.json        # dsh.bundle（cordis.patch.yml 组合层）+ dsh.client（platform web）
-├── cordis.patch.yml    # insert 挂载自身
-├── index.mjs           # Node half：Cordis entry（deepread 工具 + PDF/HTML 解析 + 三格式导出）
-└── lib/client.js       # Client half：__ModuleLoader__ 注册（结果卡片 + 输入区精读条）
+├── package.json            # dsh.bundle + dsh.client + dsh.skills
+├── cordis.patch.yml        # insert 挂载自身
+├── index.mjs               # Node half：Cordis entry（deepread 工具 + PDF/HTML 解析 + 三格式导出）
+├── lib/client.js           # Client half：__ModuleLoader__ 注册（结果卡片 + 输入区精读条）
+├── skills/deepread/        # Codex / Claude Code 兼容 skill（SKILL.md + references）
+└── .claude-plugin/         # Claude Code / Codex 插件清单（plugin.json + marketplace.json）
 ```
 
 依赖 `@deepseek-ai/*` 官方包由 profile pnpm 闭包注入，不在 package.json 声明。
