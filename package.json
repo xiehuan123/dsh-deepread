@@ -51,6 +51,7 @@
     "skills/",
     ".claude-plugin/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "examples/"
   ]
 }
