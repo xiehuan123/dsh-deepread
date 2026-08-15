@@ -48,7 +48,9 @@ const deepreadStatsDomainSpec = defineDomain({
 })
 
 export const name = 'deepread'
-export const inject = ['fs', 'llm', 'tools', 'web', 'agentDefaultModel', 'sandboxPolicy']
+// webServer 为硬依赖：面板直调 API 依赖它，且必须等它就绪后 apply 才注册路由，
+// 否则可选获取会因服务时序静默跳过注册（面板收到 404）。
+export const inject = ['fs', 'llm', 'tools', 'web', 'agentDefaultModel', 'sandboxPolicy', 'webServer']
 
 export function apply(ctx, config) {
   const cfg = config !== null && typeof config === 'object' ? config : {}
@@ -2972,9 +2974,10 @@ export function apply(ctx, config) {
   // 精读面板「预算预检」按钮经同源 HTTP 调用本路由：Host 直接抓取/读取来源并估算，
   // 面板内显示一行结论，不再把指令发进对话。复用 resolveForEstimate（微信抓取/缓存/
   // 反爬回退/PDF 采样外推）与 buildEstimate（与模型工具同源），返回 lossless JSON。
-  const webServer = ctx.get('webServer')
-  if (webServer !== undefined && typeof webServer.register === 'function') {
-    ctx.effect(() => webServer.register({
+  // webServer 已声明为 inject 硬依赖，apply 执行时必然就绪；防御式判断兼容测试/降级环境。
+  const panelWebServer = ctx.webServer
+  if (panelWebServer !== undefined && typeof panelWebServer.register === 'function') {
+    ctx.effect(() => panelWebServer.register({
       kind: 'exact',
       path: '/api/deepread/budget',
       handler: async (req, res) => {

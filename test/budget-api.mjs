@@ -46,18 +46,18 @@ await copyFile(join(root, 'index.mjs'), join(tmp, 'index.mjs'))
 const mod = await import(pathToFileURL(join(tmp, 'index.mjs')).href)
 assert.equal(mod.name, 'deepread')
 
-// fake ctx：webServer 捕获注册的路由，其余服务与 smoke 一致。
+// fake ctx：webServer 为 inject 硬依赖，挂在 ctx 属性上（Cordis 注入形态），捕获注册的路由。
 const holder = {}
 const ctx = {
-  get: (name) => (name === 'webServer' ? holder.webServer : undefined),
+  get: () => undefined,
   effect: (fn) => { fn(); return () => {} },
   llm: {
     listProviders: () => [{ id: 'fake' }],
     listModels: async () => ['fake-model'],
   },
   tools: { register: () => {} },
+  webServer: { register: (route) => { holder.route = route; return () => {} } },
 }
-holder.webServer = { register: (route) => { holder.route = route; return () => {} } }
 
 mod.apply(ctx, undefined)
 assert.ok(holder.route, 'route registered when webServer is present')
