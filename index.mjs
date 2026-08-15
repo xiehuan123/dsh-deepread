@@ -141,6 +141,7 @@ export function apply(ctx) {
     if (failure !== null) throw new Error('模型调用失败：' + failure)
     if (text.trim() === '') throw new Error('模型返回了空结果')
     return text
+  }
 
   // 带重试的 JSON 调用：解析失败时追加校正提示重试（最多 2 次重试）
   async function callModelJson(cfg, system, userText, maxTokens) {
@@ -161,7 +162,6 @@ export function apply(ctx) {
     }
     const shown = String(lastRaw).slice(0, 200)
     throw new Error('模型输出无法解析为 JSON（已重试 3 次）。' + (shown.trim() === '' ? '三次输出均为空。' : '输出片段：' + shown))
-  }
   }
 
   // ---------- PDF 文本提取（纯 JS：inflate + ToUnicode） ----------
