@@ -1896,7 +1896,13 @@ export function apply(ctx, config) {
 
   function metaFooter(meta) {
     const cacheText = cacheLabel(meta)
-    return '（来源：' + str(meta.source, '粘贴文本') + ' · 字数：' + (typeof meta.chars === 'number' ? meta.chars : 0) + ' · 深度：' + str(meta.depth, 'deep') + (cacheText !== '' ? ' · ' + cacheText : '') + '）'
+    let estText = ''
+    const est = meta !== null && typeof meta === 'object' && meta.estimate !== null && typeof meta.estimate === 'object' ? meta.estimate : null
+    if (est !== null && Array.isArray(est.modes)) {
+      const row = est.modes.find((mm) => mm !== null && typeof mm === 'object' && mm.mode === meta.depth) || null
+      if (row !== null && typeof row.calls === 'number') estText = ' · 本次预算：约 ' + row.calls + ' 次调用 / ' + row.totalTokens + ' token / ≈' + row.minutes + ' 分钟'
+    }
+    return '（来源：' + str(meta.source, '粘贴文本') + ' · 字数：' + (typeof meta.chars === 'number' ? meta.chars : 0) + ' · 深度：' + str(meta.depth, 'deep') + (cacheText !== '' ? ' · ' + cacheText : '') + estText + '）'
   }
 
   function renderFeynmanMarkdown(v) {

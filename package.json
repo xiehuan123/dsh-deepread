@@ -1,7 +1,7 @@
 {
   "name": "dsh-deepread",
   "description": "AI deep-reading assistant: extract core claims, argument structure, and key evidence from books and articles. Five modes (quick, deep, knowledge map, Feynman, full book); knowledge-map reports include confidence levels, data facts, relation labels, Mermaid mindmaps, and recall questions. Reads WeChat article URLs, TXT/Markdown/HTML/PDF files, or pasted text (built-in pure-JS PDF extractor). Exports Markdown, FreeMind/XMind mindmaps, and HTML reports. DeepSeek Harness plugin.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "license": "MIT",
   "type": "module",
   "main": "./index.mjs",
