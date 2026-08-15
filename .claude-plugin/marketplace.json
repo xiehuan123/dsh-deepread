@@ -4,7 +4,7 @@
     "name": "xiehuan123",
     "url": "https://github.com/xiehuan123"
   },
-  "description": "DeepRead 精读助手：精读一本书或一篇文章，提取核心观点、论证结构与关键论据，支持知识地图与费曼读书法。",
+  "description": "Deep-reading assistant: extract core claims, argument structure, and key evidence from books and articles, with knowledge-map and Feynman reading modes.",
   "plugins": [
     {
       "name": "dsh-deepread",
@@ -14,8 +14,13 @@
       "keywords": [
         "reading",
         "deep-read",
+        "deep-reading",
         "knowledge-map",
+        "mindmap",
         "feynman",
+        "book",
+        "article",
+        "analysis",
         "chinese"
       ]
     }
