@@ -993,10 +993,91 @@ export function apply(ctx) {
     }
   }
 
+  // ---- 费曼读书法（feynman 模式）----
+  const FEYNMAN_STRUCT_SCHEMA = [
+    '{',
+    '  "toc": ["章节标题与一句话简介（按顺序）"],',
+    '  "questions": ["阅读本书想解决的问题（3-6 条）"]',
+    '}',
+  ].join('\n')
+
+  function feynmanStructSystem(language) {
+    const lang = language === 'en' ? 'English' : (language === 'zh' ? '简体中文' : '与原文语言保持一致')
+    return '你是费曼读书法教练。第一步：浏览目录并提出阅读问题。\n严格只输出一个 JSON 对象（不要任何解释或 Markdown 代码块）：\n' + FEYNMAN_STRUCT_SCHEMA + '\n输出语言：' + lang + '。'
+  }
+
+  const FEYNMAN_CHAPTER_SCHEMA = [
+    '{',
+    '  "title": "本章标题",',
+    '  "points": [{"claim": "核心观点", "data": "相关数据（无则留空）", "evidence": "原文证据（无则填「原文未提供证据」）"}],',
+    '  "chapterMap": "本章 mermaid mindmap 语法导图",',
+    '  "explanation": "合上书，用大白话向零基础的 12 岁孩子讲解本章（多用类比，禁止术语堆砌）",',
+    '  "gaps": ["刚才讲解中含糊、跳步、术语化或没讲清的地方"],',
+    '  "corrections": ["回到原文核对后，对每个缺口的修正"]',
+    '}',
+  ].join('\n')
+
+  function feynmanChapterSystem(language, focus) {
+    const lang = language === 'en' ? 'English' : (language === 'zh' ? '简体中文' : '与原文语言保持一致')
+    let sys = '你是费曼读书法教练。请对本章依次完成五步，并严格只输出一个 JSON 对象（不要任何解释或 Markdown 代码块）：\n'
+      + FEYNMAN_CHAPTER_SCHEMA + '\n'
+      + '要求：\n'
+      + '1. points 严格区分三类信息：claim 是作者的观点主张，data 是原文数据（完整数值与单位），evidence 是原文句子证据；没有证据时 evidence 必须填「原文未提供证据」。\n'
+      + '2. chapterMap 用 mermaid mindmap 语法。\n'
+      + '3. explanation 必须「合上书」——假装看不到原文，用大白话讲给初学者听，允许类比，禁止术语堆砌；卡壳就如实暴露。\n'
+      + '4. gaps 要诚实指出自己刚才讲解中含糊、跳步、说不清的地方（这正是费曼法的核心）。\n'
+      + '5. corrections 逐条回到原文核对并修正讲解。\n'
+      + '输出语言：' + lang + '。\n'
+    if (focus.trim() !== '') sys += '读者特别关注：' + focus.trim() + '。\n'
+    return sys
+  }
+
+  function feynmanChapterUser(text, index, total) {
+    return '【第 ' + index + ' / ' + total + ' 章】\n\n' + text
+  }
+
+  const FEYNMAN_FINAL_SCHEMA = [
+    '{',
+    '  "title": "全书标题",',
+    '  "summary": "一句话总结",',
+    '  "thesis": "核心论点",',
+    '  "bookMap": "mermaid mindmap 全书导图（合并各章）",',
+    '  "finalExplanation": "合上书，把全书讲给一个完全没读过的人听",',
+    '  "reviewPlan": [{"interval": "第1天/第3天/第7天/第14天/第30天", "focus": "该轮复习重点", "method": "复习方式（如复述要点/回答回忆问题）"}]',
+    '}',
+  ].join('\n')
+
+  function feynmanFinalSystem(language) {
+    const lang = language === 'en' ? 'English' : (language === 'zh' ? '简体中文' : '与原文语言保持一致')
+    return '你是费曼读书法教练。请完成全书收尾：合并导图、终讲与间隔复习计划。\n严格只输出一个 JSON 对象（不要任何解释或 Markdown 代码块）：\n'
+      + FEYNMAN_FINAL_SCHEMA + '\n'
+      + 'reviewPlan 必须覆盖 5 个间隔：第1天（当天回顾）、第3天、第7天、第14天、第30天，每轮给出复习重点与具体方式。\n输出语言：' + lang + '。'
+  }
+
+  function feynmanFinalUser(compact) {
+    return '以下 JSON 数组是各章的要点与讲解摘要：\n\n' + JSON.stringify(compact)
+  }
+
+  function sanitizeFeynmanChapter(parsed, index) {
+    const p = parsed !== null && typeof parsed === 'object' ? parsed : {}
+    return {
+      index: index,
+      title: str(p.title, '第 ' + index + ' 章'),
+      points: arr(p.points).slice(0, 10).map((pt) => {
+        const po = pt !== null && typeof pt === 'object' ? pt : { claim: String(pt) }
+        return { claim: str(po.claim, ''), data: str(po.data, ''), evidence: str(po.evidence, '原文未提供证据') }
+      }).filter((x) => x.claim !== ''),
+      chapterMap: str(p.chapterMap, ''),
+      explanation: str(p.explanation, ''),
+      gaps: arr(p.gaps).slice(0, 6).map((g) => String(g).trim()).filter((g) => g !== ''),
+      corrections: arr(p.corrections).slice(0, 6).map((c) => String(c).trim()).filter((c) => c !== ''),
+    }
+  }
+
   async function computeResult(input) {
     const args = input !== null && typeof input === 'object' ? input : {}
     const started = Date.now()
-    const depth = args.depth === 'quick' ? 'quick' : (args.depth === 'book' ? 'book' : (args.depth === 'map' ? 'map' : 'deep'))
+    const depth = args.depth === 'quick' ? 'quick' : (args.depth === 'book' ? 'book' : (args.depth === 'map' ? 'map' : (args.depth === 'feynman' ? 'feynman' : 'deep')))
     const language = args.language === 'en' ? 'en' : (args.language === 'zh' ? 'zh' : 'auto')
     const focus = typeof args.focus === 'string' ? args.focus : ''
 
@@ -1042,6 +1123,53 @@ export function apply(ctx) {
       return sanitizeMap(finalParsed, chapters, { source, sourceKind, chars: text.length, chunks: chapters.length, depth: 'map', durationMs: Date.now() - started })
     }
 
+    if (depth === 'feynman') {
+      const isBook = text.length > 9000
+      let toc = []
+      let questions = []
+      if (isBook) {
+        const structParsed = parseJson(await callModel(cfg, feynmanStructSystem(language), '请浏览目录并提出阅读问题：\n\n' + text.slice(0, 5000), 1200))
+        if (structParsed !== null) {
+          toc = arr(structParsed.toc).slice(0, 30).map((x) => String(x).trim()).filter((x) => x !== '')
+          questions = arr(structParsed.questions).slice(0, 6).map((x) => String(x).trim()).filter((x) => x !== '')
+        }
+      }
+      let parts = splitChunks(text, CHUNK_CHARS)
+      if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS)
+      const feynmanChapters = []
+      for (let i = 0; i < parts.length; i++) {
+        const parsed = parseJson(await callModel(cfg, feynmanChapterSystem(language, focus), feynmanChapterUser(parts[i], i + 1, parts.length), 3500))
+        feynmanChapters.push(sanitizeFeynmanChapter(parsed, i + 1))
+      }
+      const compact = feynmanChapters.map((c) => ({ title: c.title, points: c.points.slice(0, 3), explanation: c.explanation.slice(0, 300) }))
+      const finalParsed = parseJson(await callModel(cfg, feynmanFinalSystem(language), feynmanFinalUser(compact), 3500))
+      const fp = finalParsed !== null && typeof finalParsed === 'object' ? finalParsed : {}
+      const reviewPlan = arr(fp.reviewPlan).slice(0, 5).map((r) => {
+        const ro = r !== null && typeof r === 'object' ? r : { interval: String(r) }
+        return { interval: str(ro.interval, ''), focus: str(ro.focus, ''), method: str(ro.method, '') }
+      }).filter((r) => r.interval !== '')
+      const first = feynmanChapters[0] || {}
+      const firstClaim = first.points !== undefined && first.points.length > 0 ? first.points[0].claim : ''
+      return {
+        kind: 'feynman',
+        title: str(fp.title, isBook ? '费曼读书报告' : '费曼精读报告'),
+        summary: str(fp.summary, typeof first.explanation === 'string' ? first.explanation.slice(0, 100) : ''),
+        thesis: str(fp.thesis, firstClaim),
+        toc: toc,
+        questions: questions,
+        feynmanChapters: feynmanChapters,
+        bookMap: str(fp.bookMap, ''),
+        finalExplanation: str(fp.finalExplanation, ''),
+        reviewPlan: reviewPlan,
+        arguments: [],
+        quotes: [],
+        concepts: [],
+        structure: [],
+        chapters: [],
+        meta: { source, sourceKind, chars: text.length, chunks: feynmanChapters.length, depth: 'feynman', durationMs: Date.now() - started },
+      }
+    }
+
     const chunked = depth === 'book' || text.length > 9000
     const chapters = []
     if (chunked) {
@@ -1085,6 +1213,50 @@ export function apply(ctx) {
       structure, chapters,
       meta: { source, sourceKind, chars: text.length, chunks: chunked ? chapters.length : 1, depth, durationMs: Date.now() - started },
     }
+  }
+
+  function renderFeynmanMarkdown(v) {
+    const lines = ['# 🧠 费曼读书报告：' + str(v.title, '未命名')]
+    if (str(v.summary, '') !== '') lines.push('', '**一句话总结**：' + v.summary)
+    if (str(v.thesis, '') !== '') lines.push('', '**核心论点**：' + v.thesis)
+    if (arr(v.toc).length > 0) {
+      lines.push('', '**目录**：')
+      arr(v.toc).forEach((t) => lines.push('- ' + t))
+    }
+    const qs = arr(v.questions)
+    if (qs.length > 0) {
+      lines.push('', '**阅读问题清单**：')
+      qs.forEach((q, i) => lines.push((i + 1) + '. ' + q))
+    }
+    arr(v.feynmanChapters).forEach((ch) => {
+      const o = ch !== null && typeof ch === 'object' ? ch : {}
+      lines.push('', '## 第 ' + o.index + ' 章：' + str(o.title, ''))
+      const pts = arr(o.points)
+      if (pts.length > 0) {
+        lines.push('', '**观点 · 数据 · 证据**：')
+        pts.forEach((p, i) => {
+          const po = p !== null && typeof p === 'object' ? p : { claim: String(p) }
+          lines.push((i + 1) + '. ' + str(po.claim, '') + (str(po.data, '') !== '' ? '（数据：' + po.data + '）' : '') + (str(po.evidence, '') !== '' ? ' —— 证据：' + po.evidence : ''))
+        })
+      }
+      if (str(o.chapterMap, '') !== '') lines.push('', '**章节导图**：', '```mermaid', o.chapterMap, '```')
+      if (str(o.explanation, '') !== '') lines.push('', '**费曼讲解（合上书）**：', o.explanation)
+      const gaps = arr(o.gaps)
+      if (gaps.length > 0) lines.push('', '**知识缺口**：', gaps.map((g) => '- ' + g).join('\n'))
+      const fixes = arr(o.corrections)
+      if (fixes.length > 0) lines.push('', '**原文修正**：', fixes.map((f) => '- ' + f).join('\n'))
+    })
+    if (str(v.bookMap, '') !== '') lines.push('', '## 合并全书导图', '```mermaid', v.bookMap, '```')
+    if (str(v.finalExplanation, '') !== '') lines.push('', '## 再讲一次（全书终讲）', v.finalExplanation)
+    const rp = arr(v.reviewPlan)
+    if (rp.length > 0) {
+      lines.push('', '## 间隔复习计划')
+      rp.forEach((r) => {
+        const ro = r !== null && typeof r === 'object' ? r : { interval: String(r) }
+        lines.push('- **' + str(ro.interval, '') + '**：' + str(ro.focus, '') + (str(ro.method, '') !== '' ? '（' + ro.method + '）' : ''))
+      })
+    }
+    return lines.join('\n')
   }
 
   function renderMapMarkdown(v) {
@@ -1134,6 +1306,7 @@ export function apply(ctx) {
 
   function renderMarkdown(v) {
     if (v.kind === 'map') return renderMapMarkdown(v)
+    if (v.kind === 'feynman') return renderFeynmanMarkdown(v)
     const lines = ['# 📖 精读报告：' + str(v.title, '未命名')]
     if (str(v.summary, '') !== '') lines.push('', '**一句话总结**：' + v.summary)
     if (str(v.thesis, '') !== '') lines.push('', '**核心论点**：' + v.thesis)
@@ -1219,6 +1392,30 @@ export function apply(ctx) {
       root.children = { attached: kids }
       return root
     }
+    if (v.kind === 'feynman') {
+      const kids = []
+      if (arr(v.toc).length > 0) kids.push(node('目录', arr(v.toc).map((t) => node(String(t).slice(0, 50)))))
+      const qs = arr(v.questions)
+      if (qs.length > 0) kids.push(node('阅读问题', qs.map((q) => node(String(q).slice(0, 50)))))
+      const chs = arr(v.feynmanChapters)
+      if (chs.length > 0) {
+        kids.push(node('章节', chs.map((c) => {
+          const o = c !== null && typeof c === 'object' ? c : {}
+          const pts = arr(o.points).slice(0, 4).map((p) => {
+            const po = p !== null && typeof p === 'object' ? p : { claim: String(p) }
+            return node(String(str(po.claim, '')).slice(0, 50))
+          })
+          return node('第 ' + o.index + ' 章 ' + String(str(o.title, '')).slice(0, 30), pts)
+        })))
+      }
+      const rp = arr(v.reviewPlan)
+      if (rp.length > 0) kids.push(node('间隔复习', rp.map((r) => {
+        const ro = r !== null && typeof r === 'object' ? r : { interval: String(r) }
+        return node(String(str(ro.interval, '') + ' ' + str(ro.focus, '')).slice(0, 50))
+      })))
+      root.children = { attached: kids }
+      return root
+    }
     const kids = []
     if (typeof v.thesis === 'string' && v.thesis !== '') kids.push(node('核心论点', [node(v.thesis)]))
     const args = Array.isArray(v.arguments) ? v.arguments : []
@@ -1278,7 +1475,8 @@ export function apply(ctx) {
     const title = typeof v.title === 'string' && v.title !== '' ? v.title : '精读报告'
     const meta = v.meta !== null && typeof v.meta === 'object' ? v.meta : {}
     const isMap = v.kind === 'map'
-    const depthLabel = { quick: '快速要点', deep: '深度精读', book: '全书精读', map: '知识地图' }[meta.depth] || '精读'
+    const isFeynman = v.kind === 'feynman'
+    const depthLabel = { quick: '快速要点', deep: '深度精读', book: '全书精读', map: '知识地图', feynman: '费曼读书法' }[meta.depth] || '精读'
     const sections = []
     const add = (t, h) => sections.push('<section class="sec"><h2><span class="num">' + String(sections.length + 1).padStart(2, '0') + '</span>' + esc(t) + '</h2>' + h + '</section>')
     if (isMap) {
@@ -1336,6 +1534,37 @@ export function apply(ctx) {
       if (typeof v.xmindOutline === 'string' && v.xmindOutline !== '') add('XMind 大纲', '<pre class="pre">' + esc(v.xmindOutline) + '</pre>')
       const rqs = Array.isArray(v.recallQuestions) ? v.recallQuestions : []
       if (rqs.length > 0) add('主动回忆问题', '<ol class="list">' + rqs.map((q) => '<li>' + esc(q) + '</li>').join('') + '</ol>')
+    } else if (isFeynman) {
+      if (typeof v.summary === 'string' && v.summary !== '') add('一句话总结', '<p class="lead">' + esc(v.summary) + '</p>')
+      if (typeof v.thesis === 'string' && v.thesis !== '') add('核心论点', '<div class="hl">' + esc(v.thesis) + '</div>')
+      const toc = Array.isArray(v.toc) ? v.toc : []
+      if (toc.length > 0) add('浏览目录', '<ol class="list">' + toc.map((t) => '<li>' + esc(t) + '</li>').join('') + '</ol>')
+      const qs = Array.isArray(v.questions) ? v.questions : []
+      if (qs.length > 0) add('阅读问题清单', '<ol class="list">' + qs.map((q) => '<li>' + esc(q) + '</li>').join('') + '</ol>')
+      const chs = Array.isArray(v.feynmanChapters) ? v.feynmanChapters : []
+      for (const c of chs) {
+        const o = c !== null && typeof c === 'object' ? c : {}
+        let h = ''
+        const pts = Array.isArray(o.points) ? o.points : []
+        if (pts.length > 0) h += '<ol class="concl">' + pts.map((p) => {
+          const po = p !== null && typeof p === 'object' ? p : { claim: String(p) }
+          return '<li><span class="claim">' + esc(typeof po.claim === 'string' ? po.claim : '') + '</span>' + (typeof po.data === 'string' && po.data !== '' ? '<div class="ev">数据 · ' + esc(po.data) + '</div>' : '') + (typeof po.evidence === 'string' && po.evidence !== '' ? '<div class="ev">证据 · ' + esc(po.evidence) + '</div>' : '') + '</li>'
+        }).join('') + '</ol>'
+        if (typeof o.chapterMap === 'string' && o.chapterMap !== '') h += '<pre class="pre">' + esc(o.chapterMap) + '</pre>'
+        if (typeof o.explanation === 'string' && o.explanation !== '') h += '<div class="hl"><span class="hl-label">合上书讲解</span>' + esc(o.explanation) + '</div>'
+        const gaps = Array.isArray(o.gaps) ? o.gaps : []
+        if (gaps.length > 0) h += '<p class="ev-missing">知识缺口：' + gaps.map((g) => esc(g)).join('；') + '</p>'
+        const fixes = Array.isArray(o.corrections) ? o.corrections : []
+        if (fixes.length > 0) h += '<p class="ev">原文修正：' + fixes.map((f) => esc(f)).join('；') + '</p>'
+        add('第 ' + o.index + ' 章 · ' + (typeof o.title === 'string' ? o.title : ''), h)
+      }
+      if (typeof v.bookMap === 'string' && v.bookMap !== '') add('合并全书导图', '<pre class="pre">' + esc(v.bookMap) + '</pre>')
+      if (typeof v.finalExplanation === 'string' && v.finalExplanation !== '') add('再讲一次（全书终讲）', '<div class="hl">' + esc(v.finalExplanation) + '</div>')
+      const rp = Array.isArray(v.reviewPlan) ? v.reviewPlan : []
+      if (rp.length > 0) add('间隔复习计划', rp.map((r) => {
+        const ro = r !== null && typeof r === 'object' ? r : { interval: String(r) }
+        return '<div class="it"><span class="claim">' + esc(typeof ro.interval === 'string' ? ro.interval : '') + '</span><div class="ev">' + esc(typeof ro.focus === 'string' ? ro.focus : '') + (typeof ro.method === 'string' && ro.method !== '' ? '（' + esc(ro.method) + '）' : '') + '</div></div>'
+      }).join(''))
     } else {
       if (typeof v.summary === 'string' && v.summary !== '') add('一句话总结', '<p class="lead">' + esc(v.summary) + '</p>')
       if (typeof v.thesis === 'string' && v.thesis !== '') add('核心论点', '<div class="hl">' + esc(v.thesis) + '</div>')
@@ -1363,7 +1592,7 @@ export function apply(ctx) {
       if (questions.length > 0) add('批判性思考', '<ul class="list">' + questions.map((q) => '<li>' + esc(q) + '</li>').join('') + '</ul>')
     }
     const mind = htmlTree(buildMindTree(v), 0)
-    const kindLabel = isMap ? '知识地图' : '精读报告'
+    const kindLabel = isMap ? '知识地图' : (isFeynman ? '费曼读书报告' : '精读报告')
     const css = [
       ':root{--bg:#F8FAFC;--surface:#FFFFFF;--fg:#0F172A;--fg2:#334155;--muted:#64748B;--border:#E2E8F0;--accent:#2563EB;--accent2:#1D4ED8;--ok:#16A34A;--ok-bg:#F0FDF4;--warn:#B45309;--warn-bg:#FFFBEB;--bad:#DC2626;--bad-bg:#FEF2F2;--info:#2563EB;--info-bg:#EFF6FF;--radius:14px}',
       '@media (prefers-color-scheme:dark){:root{--bg:#0B1220;--surface:#101A2C;--fg:#E2E8F0;--fg2:#CBD5E1;--muted:#94A3B8;--border:#1E293B;--accent:#60A5FA;--accent2:#93C5FD;--ok:#4ADE80;--ok-bg:#052E16;--warn:#FBBF24;--warn-bg:#451A03;--bad:#F87171;--bad-bg:#450A0A;--info:#60A5FA;--info-bg:#172554}}',
@@ -1477,13 +1706,13 @@ export function apply(ctx) {
 
   const tool = defineTool({
     name: 'deepread',
-    description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。四种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）。知乎/掘金等反爬站点请粘贴正文。',
+    description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。五种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；feynman=费曼读书法（浏览目录→提出问题→分章阅读→提取观点数据证据→章节导图→合上书讲解→自检知识缺口→回原文修正→合并全书导图→再讲一次→间隔复习计划）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）。知乎/掘金等反爬站点请粘贴正文。',
     timeoutMs: 900000,
     parameters: {
       url: { type: 'string', description: '要精读的网页链接。仅支持微信公众号（mp.weixin.qq.com）的稳定链接；知乎/掘金等有反爬的站点不支持，请粘贴正文。与 path/text 至少提供一个。' },
       text: { type: 'string', description: '要精读的文本内容，直接粘贴。与 url/path 至少提供一个。' },
       path: { type: 'string', description: '工作区内要精读的文件路径，支持 .txt/.md/.markdown/.html 与 .pdf，如 "notes/第一章.md" 或 "book.pdf"。' },
-      depth: { type: 'string', enum: ['quick', 'deep', 'map', 'book'], default: 'deep', description: '精读模式。quick=快速抓要点；deep=深度精读（默认，长文自动分段）；map=「观点—证据—数据—关系」知识地图；book=整本书分部分精读并汇总。' },
+      depth: { type: 'string', enum: ['quick', 'deep', 'map', 'feynman', 'book'], default: 'deep', description: '精读模式。quick=快速抓要点；deep=深度精读（默认，长文自动分段）；map=「观点—证据—数据—关系」知识地图；feynman=费曼读书法（11 步闭环：目录→提问→分章→观点数据证据→章节导图→合上书讲解→找缺口→回原文修正→合并导图→再讲一次→间隔复习）；book=整本书分部分精读并汇总。' },
       export: { type: 'string', enum: ['none', 'md', 'mm', 'html', 'all'], default: 'none', description: '导出格式。none=不落盘，仅在会话中展示（默认）；md=导出 Markdown 报告；mm=导出 FreeMind 思维导图（XMind 可导入）；html=导出网页报告；all=三种全部导出。' },
       focus: { type: 'string', description: '读者特别关注的角度，例如"论证逻辑""研究方法""与既有理论的关系"。' },
       language: { type: 'string', enum: ['zh', 'en', 'auto'], default: 'auto', description: '报告输出语言，默认 auto（跟随原文）。' },
@@ -1505,6 +1734,11 @@ export function apply(ctx) {
           mermaid: { type: 'string' },
           xmindOutline: { type: 'string' },
           recallQuestions: { type: 'array', items: { type: 'string' } },
+          toc: { type: 'array', items: { type: 'string' } },
+          feynmanChapters: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { index: { type: 'number' }, title: { type: 'string' }, points: { type: 'array' }, chapterMap: { type: 'string' }, explanation: { type: 'string' }, gaps: { type: 'array', items: { type: 'string' } }, corrections: { type: 'array', items: { type: 'string' } } } } },
+          bookMap: { type: 'string' },
+          finalExplanation: { type: 'string' },
+          reviewPlan: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { interval: { type: 'string' }, focus: { type: 'string' }, method: { type: 'string' } } } },
           arguments: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { claim: { type: 'string' }, evidence: { type: 'string' }, quote: { type: 'string' } } } },
           quotes: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { text: { type: 'string' }, context: { type: 'string' } } } },
           concepts: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { term: { type: 'string' }, explanation: { type: 'string' } } } },
