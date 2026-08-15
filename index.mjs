@@ -569,11 +569,16 @@ export function apply(ctx, config) {
       } else if (m[3] !== undefined) {
         const inner = m[3]
         const parts = []
-        const partRe = /\(((?:[^()\\]|\\.)*)\)|(-?\d+(?:\.\d+)?)/g
+        const partRe = /\(((?:[^()\\]|\\.)*)\)|(<[0-9A-Fa-f\s]+>)|(-?\d+(?:\.\d+)?)/g
         let pm
         while ((pm = partRe.exec(inner)) !== null) {
           if (pm[1] !== undefined) parts.push({ text: decodePdfString(pm[1]) })
-          else parts.push({ gap: parseFloat(pm[2]) })
+          else if (pm[2] !== undefined) {
+            const clean = pm[2].replace(/[^0-9a-fA-F]/g, '')
+            let s = ''
+            for (let i = 0; i + 1 < clean.length; i += 2) s += String.fromCharCode(parseInt(clean.slice(i, i + 2), 16))
+            parts.push({ text: s })
+          } else parts.push({ gap: parseFloat(pm[3]) })
         }
         let buf = ''
         let gapSum = 0
@@ -668,27 +673,242 @@ export function apply(ctx, config) {
       objects[m[1]] = m[3]
     }
 
-    function getObject(num) {
-      if (!num) return null
-      const raw = objects[num]
-      if (raw === undefined) return null
+    // ---------- 交叉引用解析（经典 xref 表 / XRef 交叉引用流 / ObjStm 对象流） ----------
+    function undoPredictor(data, predictor, columns) {
+      const bytes = latin1ToBytes(data)
+      if (predictor === 2) {
+        // TIFF 预测：每字节加上同列上一行，无 filter 字节
+        const out = new Uint8Array(bytes.length)
+        for (let i = 0; i < bytes.length; i++) {
+          out[i] = i >= columns ? (bytes[i] + out[i - columns]) & 0xff : bytes[i]
+        }
+        return bytesToLatin1(out)
+      }
+      // PNG 预测（10–15）：每行开头 1 字节 filter 类型，行宽 columns
+      const stride = columns + 1
+      const rowCount = Math.floor(bytes.length / stride)
+      const out = new Uint8Array(rowCount * columns)
+      for (let row = 0; row < rowCount; row++) {
+        const f = bytes[row * stride]
+        for (let j = 0; j < columns; j++) {
+          const x = bytes[row * stride + 1 + j]
+          const left = j > 0 ? out[row * columns + j - 1] : 0
+          const above = row > 0 ? out[(row - 1) * columns + j] : 0
+          const ul = row > 0 && j > 0 ? out[(row - 1) * columns + j - 1] : 0
+          let v
+          if (f === 1) v = x + left
+          else if (f === 2) v = x + above
+          else if (f === 3) v = x + ((left + above) >> 1)
+          else if (f === 4) {
+            const p = left + above - ul
+            const pa = Math.abs(p - left)
+            const pb = Math.abs(p - above)
+            const pc = Math.abs(p - ul)
+            v = x + (pa <= pb && pa <= pc ? left : pb <= pc ? above : ul)
+          } else v = x
+          out[row * columns + j] = v & 0xff
+        }
+      }
+      return bytesToLatin1(out)
+    }
+
+    function extractFilters(dictPart) {
+      const filters = []
+      const f1 = dictPart.match(/\/Filter\s*\[([^\]]*)\]/)
+      const f2 = dictPart.match(/\/Filter\s*\/([A-Za-z0-9_+.\-]+)/)
+      if (f1) {
+        for (const f of f1[1].split('/')) {
+          const name = f.trim()
+          if (name) filters.push(name)
+        }
+      } else if (f2) filters.push(f2[1])
+      return filters
+    }
+
+    function parseObjectBody(raw) {
       const sIdx = raw.indexOf('stream')
       if (sIdx >= 0) {
         const dictPart = raw.slice(0, sIdx)
         const after = raw.slice(sIdx + 'stream'.length)
         const { data } = findStreamEnd(after, 0)
-        const filters = []
-        const f1 = dictPart.match(/\/Filter\s*\[([^\]]*)\]/)
-        const f2 = dictPart.match(/\/Filter\s*\/([A-Za-z0-9_+.\-]+)/)
-        if (f1) {
-          for (const f of f1[1].split('/')) {
-            const name = f.trim()
-            if (name) filters.push(name)
-          }
-        } else if (f2) filters.push(f2[1])
-        return { dict: dictPart, stream: data, filters }
+        return { dict: dictPart, stream: data, filters: extractFilters(dictPart) }
       }
       return { dict: raw, stream: null, filters: [] }
+    }
+
+    function parseXrefStreamEntries(node) {
+      const entries = new Map()
+      const dict = node.dict
+      const wMatch = dict.match(/\/W\s*\[([^\]]*)\]/)
+      if (!wMatch || node.stream === null) return entries
+      const w = wMatch[1].trim().split(/\s+/).map((x) => parseInt(x, 10))
+      const sizeMatch = dict.match(/\/Size\s+(\d+)/)
+      const size = sizeMatch ? parseInt(sizeMatch[1], 10) : 0
+      let indexPairs
+      const indexMatch = dict.match(/\/Index\s*\[([^\]]*)\]/)
+      if (indexMatch) {
+        const nums = indexMatch[1].trim().split(/\s+/).map((x) => parseInt(x, 10))
+        indexPairs = []
+        for (let i = 0; i + 1 < nums.length; i += 2) indexPairs.push([nums[i], nums[i + 1]])
+      } else {
+        indexPairs = [[0, size]]
+      }
+      let decoded = decodeStreamData(node.stream, node.filters)
+      const dpMatch = dict.match(/\/DecodeParms\s*<<([\s\S]*?)>>/)
+      if (dpMatch) {
+        const pm = dpMatch[1].match(/\/Predictor\s+(\d+)/)
+        const cm = dpMatch[1].match(/\/Columns\s+(\d+)/)
+        if (pm && parseInt(pm[1], 10) >= 2) decoded = undoPredictor(decoded, parseInt(pm[1], 10), cm ? parseInt(cm[1], 10) : 1)
+      }
+      const rowLen = (w[0] || 0) + (w[1] || 0) + (w[2] || 0)
+      if (rowLen === 0) return entries
+      const bytes = latin1ToBytes(decoded)
+      let p = 0
+      for (const pair of indexPairs) {
+        const first = pair[0]
+        const count = pair[1]
+        for (let i = 0; i < count; i++) {
+          if (p + rowLen > bytes.length) return entries
+          const row = bytes.subarray(p, p + rowLen)
+          p += rowLen
+          let q = 0
+          const read = (len) => { let v = 0; for (let k = 0; k < len; k++) v = v * 256 + row[q + k]; q += len; return v }
+          const type = w[0] > 0 ? read(w[0]) : 1
+          const f2 = w[1] > 0 ? read(w[1]) : 0
+          const f3 = w[2] > 0 ? read(w[2]) : 0
+          if (type !== 0) entries.set(first + i, { type, f2, f3 })
+        }
+      }
+      return entries
+    }
+
+    function loadRawByOffset(num, offset) {
+      const head = latin1.slice(offset, offset + 48).match(/^\s*(\d+)\s+(\d+)\s+obj\b/)
+      if (!head || head[1] !== String(num)) return null
+      const bodyStart = offset + head[0].length
+      const seg = latin1.slice(bodyStart)
+      const nextObj = seg.search(/[\r\n]\s*\d+\s+\d+\s+obj\b/)
+      let raw = nextObj === -1 ? seg : seg.slice(0, nextObj + 1)
+      const eo = raw.lastIndexOf('endobj')
+      if (eo >= 0) raw = raw.slice(0, eo)
+      return raw
+    }
+
+    const xrefEntries = new Map()
+    let trailerDict = ''
+    const smAll = latin1.match(/startxref\s+(\d+)/g)
+    if (smAll !== null && smAll.length > 0) {
+      const xrefOffset = parseInt(smAll[smAll.length - 1].match(/(\d+)/)[1], 10)
+      const at = latin1.slice(xrefOffset, xrefOffset + 16)
+      if (/^\s*xref\b/.test(at)) {
+        // 经典 xref 表：解析各 subsection 的 20 字节条目
+        const tMatch = latin1.slice(xrefOffset).match(/[\s\S]*?trailer\b/)
+        const tableText = tMatch ? tMatch[0].slice(0, -'trailer'.length) : latin1.slice(xrefOffset)
+        let pos = 0
+        const subHeaderRe = /(\d+)\s+(\d+)\s*[\r\n]+/g
+        while (true) {
+          subHeaderRe.lastIndex = pos
+          const h = subHeaderRe.exec(tableText)
+          if (h === null) break
+          const first = parseInt(h[1], 10)
+          const count = parseInt(h[2], 10)
+          pos = h.index + h[0].length
+          for (let i = 0; i < count; i++) {
+            const line = tableText.slice(pos, pos + 20)
+            pos += 20
+            const em = line.match(/(\d{10})\s+(\d{5})\s+([nf])/)
+            if (em === null) continue
+            if (em[3] !== 'f') xrefEntries.set(first + i, { type: 1, f2: parseInt(em[1], 10), f3: parseInt(em[2], 10) })
+          }
+        }
+        const tr = latin1.slice(xrefOffset).match(/trailer\s*(<<[\s\S]*?>>)/)
+        if (tr) trailerDict = tr[1]
+      } else if (at.match(/^\s*\d+\s+\d+\s+obj\b/)) {
+        // XRef 交叉引用流（PDF 1.5+）：trailer 键就在流的字典里
+        const headNumMatch = at.match(/^\s*(\d+)\s+\d+\s+obj\b/)
+        if (headNumMatch) {
+          const xrefNum = headNumMatch[1]
+          let xrefNode = objects[xrefNum]
+          if (xrefNode === undefined) xrefNode = loadRawByOffset(xrefNum, xrefOffset)
+          if (xrefNode !== null && xrefNode !== undefined) {
+            const node = parseObjectBody(xrefNode)
+            for (const [k, v] of parseXrefStreamEntries(node)) xrefEntries.set(k, v)
+            trailerDict = node.dict
+          }
+        }
+      }
+    }
+    // 混合文件：经典 trailer 携带 /XRefStm 指向补充的交叉引用流
+    if (trailerDict !== '') {
+      const xsm = trailerDict.match(/\/XRefStm\s+(\d+)/)
+      if (xsm) {
+        const xoff = parseInt(xsm[1], 10)
+        const hm = latin1.slice(xoff, xoff + 48).match(/^\s*(\d+)\s+\d+\s+obj\b/)
+        if (hm && objects[hm[1]] !== undefined) {
+          const node = parseObjectBody(objects[hm[1]])
+          for (const [k, v] of parseXrefStreamEntries(node)) xrefEntries.set(k, v)
+        }
+      }
+    }
+
+    // ---------- ObjStm 对象流展开与对象解析 ----------
+    const objstmObjects = {}
+    const expandedStms = new Set()
+
+    function expandObjStm(sn) {
+      if (expandedStms.has(sn)) return
+      expandedStms.add(sn)
+      const node = getObject(sn)
+      if (node === null || node.stream === null) return
+      const nMatch = node.dict.match(/\/N\s+(\d+)/)
+      const fMatch = node.dict.match(/\/First\s+(\d+)/)
+      if (!nMatch || !fMatch) return
+      const n = parseInt(nMatch[1], 10)
+      const first = parseInt(fMatch[1], 10)
+      let decoded = decodeStreamData(node.stream, node.filters)
+      const dpMatch = node.dict.match(/\/DecodeParms\s*<<([\s\S]*?)>>/)
+      if (dpMatch) {
+        const pm = dpMatch[1].match(/\/Predictor\s+(\d+)/)
+        const cm = dpMatch[1].match(/\/Columns\s+(\d+)/)
+        if (pm && parseInt(pm[1], 10) >= 2) decoded = undoPredictor(decoded, parseInt(pm[1], 10), cm ? parseInt(cm[1], 10) : 1)
+      }
+      const head = decoded.slice(0, first)
+      const toks = head.trim().split(/\s+/)
+      const pairs = []
+      for (let i = 0; i < n && i * 2 + 1 < toks.length; i++) {
+        const num = parseInt(toks[i * 2], 10)
+        const off = parseInt(toks[i * 2 + 1], 10)
+        if (!Number.isNaN(num) && !Number.isNaN(off)) pairs.push([num, off])
+      }
+      for (let i = 0; i < pairs.length; i++) {
+        const end = i + 1 < pairs.length ? first + pairs[i + 1][1] : decoded.length
+        objstmObjects[pairs[i][0]] = decoded.slice(first + pairs[i][1], end)
+      }
+    }
+
+    function getObject(num) {
+      if (!num) return null
+      let raw = objects[num]
+      if (raw === undefined) raw = objstmObjects[num]
+      if (raw === undefined) {
+        const e = xrefEntries.get(Number(num))
+        if (e !== undefined) {
+          if (e.type === 1) {
+            const r = loadRawByOffset(num, e.f2)
+            if (r !== null) { objects[num] = r; raw = r }
+          } else if (e.type === 2) {
+            expandObjStm(e.f2)
+            raw = objstmObjects[num]
+          }
+        }
+      }
+      if (raw === undefined) return null
+      return parseObjectBody(raw)
+    }
+
+    // 预先展开所有对象流（Root / Pages / Fonts 等常驻其中）
+    for (const e of xrefEntries.values()) {
+      if (e.type === 2) expandObjStm(e.f2)
     }
 
     function resolveRef(dict, key) {
@@ -698,7 +918,7 @@ export function apply(ctx, config) {
     }
     function resolveMultiRef(dict, key) {
       const out = []
-      const re = new RegExp('/' + key + '\\s+\\[([^\\]]*)\\]')
+      const re = new RegExp('/' + key + '\\s*\\[([^\\]]*)\\]')
       const mm = dict.match(re)
       if (mm) {
         const refRe = /(\d+)\s+\d+\s+R/g
@@ -711,8 +931,7 @@ export function apply(ctx, config) {
     }
 
     let rootNum = null
-    const trailerObj = objects.trailer
-    if (trailerObj !== undefined) rootNum = resolveRef(trailerObj, 'Root')
+    if (trailerDict !== '') rootNum = resolveRef(trailerDict, 'Root')
     if (!rootNum) {
       const t = latin1.match(/trailer\s*(<<[\s\S]*?>>)/)
       if (t) rootNum = resolveRef(t[1], 'Root')
@@ -732,11 +951,12 @@ export function apply(ctx, config) {
       visited.add(n)
       const node = getObject(n)
       if (!node) continue
-      const type = node.dict.match(/\/Type\s*\/Pages?/)
+      const isPages = /\/Type\s*\/Pages\b/.test(node.dict)
+      const isPage = /\/Type\s*\/Page\b/.test(node.dict)
       const kids = resolveMultiRef(node.dict, 'Kids')
-      if (type && type[0] === '/Type /Pages') {
+      if (isPages) {
         for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i])
-      } else if (type && type[0] === '/Type /Page') {
+      } else if (isPage) {
         pageNums.push(n)
       }
     }
