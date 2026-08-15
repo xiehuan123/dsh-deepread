@@ -100,7 +100,7 @@ export function apply(ctx) {
       temperature: 0.2,
       maxTokens,
     }
-    if (cfg.reasoningEffort !== undefined) options.reasoningEffort = cfg.reasoningEffort
+    // 不转发 reasoningEffort：结构化 JSON 输出不需要长思考，推理会吃光小输出预算导致空结果
     let text = ''
     let failure = null
     for await (const chunk of ctx.llm.stream(options)) {
@@ -742,14 +742,34 @@ export function apply(ctx) {
     const path = typeof args.path === 'string' ? args.path.trim() : ''
     const text = typeof args.text === 'string' ? args.text : ''
     if (url !== '') {
-      if (web === undefined) throw new Error('当前环境未挂载网页抓取服务，无法读取链接')
       const hostMatch = url.match(/^https?:\/\/([^\/?#]+)/i)
       const host = hostMatch ? hostMatch[1].toLowerCase() : ''
       if (host !== 'mp.weixin.qq.com' && host !== 'weixin.qq.com' && !host.endsWith('.weixin.qq.com')) {
         throw new Error('链接抓取仅支持微信公众号（mp.weixin.qq.com）。' + (host === '' ? '不是有效的链接。' : '「' + host + '」存在反爬或登录墙，请直接粘贴正文，或将内容保存为 .txt/.md/.pdf 后用 path 传入。'))
       }
-      const result = await web.fetch({ url })
-      if (result === null || typeof result !== 'object' || typeof result.statusCode !== 'number') throw new Error('网页抓取失败')
+      let result = null
+      let webError = null
+      if (web !== undefined) {
+        try {
+          result = await web.fetch({ url })
+        } catch (err) {
+          webError = err
+        }
+      }
+      if (result === null || typeof result !== 'object' || typeof result.statusCode !== 'number') {
+        // 回退：web 服务无可用 provider 时用 Node 全局 fetch 兜底
+        try {
+          const resp = await globalThis.fetch(url, {
+            redirect: 'follow',
+            headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36' },
+          })
+          const bodyText = await resp.text()
+          result = { statusCode: resp.status, body: { kind: 'html', content: bodyText } }
+        } catch (err) {
+          const reason = webError !== null && typeof webError === 'object' && typeof webError.message === 'string' ? webError.message : String(err)
+          throw new Error('网页抓取失败：' + reason)
+        }
+      }
       if (result.statusCode < 200 || result.statusCode >= 300) throw new Error('网页返回状态码 ' + result.statusCode + '，抓取失败')
       const body = result.body
       let contentText = ''
@@ -762,6 +782,21 @@ export function apply(ctx) {
         contentText = parsed.text
       }
       if (contentText.trim() === '') throw new Error('网页内容为空或无法解析（可能是临时链接失效、文章已删除，或需要登录）。请换稳定链接，或直接粘贴正文。')
+      // 微信反爬验证页（环境异常/去验证）不是正文：换浏览器 UA 走全局 fetch 重试一次
+      const looksAntiBot = /环境异常|完成验证|去验证/.test(contentText) && contentText.length < 4000
+      if (looksAntiBot) {
+        try {
+          const resp = await globalThis.fetch(url, {
+            redirect: 'follow',
+            headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36' },
+          })
+          const retried = htmlToText(await resp.text())
+          if (retried.text.trim() !== '' && !/环境异常|完成验证|去验证/.test(retried.text)) {
+            contentText = retried.text
+            if (retried.title !== '') pageTitle = retried.title
+          }
+        } catch (err) { /* 保留原内容，交给后续模型处理 */ }
+      }
       if (pageTitle !== '' && contentText.indexOf(pageTitle) === -1) contentText = pageTitle + '\n\n' + contentText
       return { text: contentText, source: url, sourceKind: 'url' }
     }
@@ -1128,7 +1163,7 @@ export function apply(ctx) {
       let toc = []
       let questions = []
       if (isBook) {
-        const structParsed = parseJson(await callModel(cfg, feynmanStructSystem(language), '请浏览目录并提出阅读问题：\n\n' + text.slice(0, 5000), 1200))
+        const structParsed = parseJson(await callModel(cfg, feynmanStructSystem(language), '请浏览目录并提出阅读问题：\n\n' + text.slice(0, 5000), 2500))
         if (structParsed !== null) {
           toc = arr(structParsed.toc).slice(0, 30).map((x) => String(x).trim()).filter((x) => x !== '')
           questions = arr(structParsed.questions).slice(0, 6).map((x) => String(x).trim()).filter((x) => x !== '')
@@ -1138,11 +1173,11 @@ export function apply(ctx) {
       if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS)
       const feynmanChapters = []
       for (let i = 0; i < parts.length; i++) {
-        const parsed = parseJson(await callModel(cfg, feynmanChapterSystem(language, focus), feynmanChapterUser(parts[i], i + 1, parts.length), 3500))
+        const parsed = parseJson(await callModel(cfg, feynmanChapterSystem(language, focus), feynmanChapterUser(parts[i], i + 1, parts.length), 5000))
         feynmanChapters.push(sanitizeFeynmanChapter(parsed, i + 1))
       }
       const compact = feynmanChapters.map((c) => ({ title: c.title, points: c.points.slice(0, 3), explanation: c.explanation.slice(0, 300) }))
-      const finalParsed = parseJson(await callModel(cfg, feynmanFinalSystem(language), feynmanFinalUser(compact), 3500))
+      const finalParsed = parseJson(await callModel(cfg, feynmanFinalSystem(language), feynmanFinalUser(compact), 5000))
       const fp = finalParsed !== null && typeof finalParsed === 'object' ? finalParsed : {}
       const reviewPlan = arr(fp.reviewPlan).slice(0, 5).map((r) => {
         const ro = r !== null && typeof r === 'object' ? r : { interval: String(r) }
