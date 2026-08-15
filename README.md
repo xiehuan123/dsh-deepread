@@ -88,6 +88,7 @@ npx skills@latest add xiehuan123/dsh-deepread      # 或 skills.sh
 | `text` | string | 粘贴文本 |
 | `depth` | enum | `quick` / `deep`（默认）/ `map` / `feynman` / `book` |
 | `export` | enum | `none`（默认，仅会话展示）/ `md` / `mm` / `html` / `all` |
+| `refresh` | boolean | `true` 强制重新抓取并刷新缓存（默认 `false`：同一链接命中缓存直接复用全文，不联网） |
 | `focus` | string | 读者关注角度，如「论证逻辑」「研究方法」 |
 | `language` | enum | `zh` / `en` / `auto`（默认） |
 
@@ -106,14 +107,23 @@ npx skills@latest add xiehuan123/dsh-deepread      # 或 skills.sh
 └── .codex-plugin/          # Codex 插件清单（plugin.json）
 ```
 
-`@deepseek-ai/*` 官方包（cordis / dsh-tools / schemastery）与 `react` 由宿主 profile 提供，在
-`peerDependencies` 中声明（`*` 表示跟随宿主版本）；`dsh.client.inject` 声明客户端依赖边
-（dsh-client-runtime 提供 slots/sessions，dsh-client-ui-conversation 提供 conversation）。
+`@deepseek-ai/*` 官方包（cordis / dsh-tools / schemastery / dsh-storage-domain）与 `zod`、`react`
+由宿主 profile 提供，在 `peerDependencies` 中声明（`*` 表示跟随宿主版本）；`dsh.client.inject`
+声明客户端依赖边（dsh-client-runtime 提供 slots/sessions，dsh-client-ui-conversation 提供 conversation）。
+
+## 全文缓存
+
+URL 抓取的全文按官方 storageDomain 约定落盘：`deepread-url-cache` 领域（版本 1，zod schema
+校验，记录含 `url`/`text`/`fetchedAt`），存于 `$DSH_HOME/storages/`，跨进程重启仍然有效。
+同一篇文章换模式（deep→map/feynman/book）直接复用缓存、不再联网；抓取失败时自动回退缓存并
+在报告中注明。TTL 默认 7 天，条目上限 200（写入时惰性清理过期项）。未挂载 storage 的
+profile（如无 web 组合包的 headless）自动降级为进程内缓存。
 
 ## 插件配置（Config）
 
 `timeoutMs`（默认 900000）、`chunkChars`（默认 6000）、`maxParts`（默认 20）、
-`maxInputChars`（默认 400000）均可在 cordis 行配置中覆盖，例如：
+`maxInputChars`（默认 400000）、`cacheEnabled`（默认 true）、`cacheTtlHours`（默认 168，
+0 表示不缓存）均可在 cordis 行配置中覆盖，例如：
 
 ```yaml
 - insert:
@@ -121,6 +131,7 @@ npx skills@latest add xiehuan123/dsh-deepread      # 或 skills.sh
       name: dsh-deepread
       config:
         timeoutMs: 600000
+        cacheTtlHours: 24
 ```
 
 ## 开发

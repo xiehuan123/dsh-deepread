@@ -24,6 +24,23 @@ await writeFile(join(schemasteryDir, 'index.js'), [
   '',
 ].join('\n'))
 
+const storageDomainDir = join(scope, 'dsh-storage-domain')
+await mkdir(storageDomainDir, { recursive: true })
+await writeFile(join(storageDomainDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-storage-domain', type: 'module', main: 'index.js' }))
+await writeFile(join(storageDomainDir, 'index.js'), [
+  'export function defineDomain(spec){ return spec }',
+  'export function domainTable(keySchema, recordSchema){ return { keySchema, recordSchema } }',
+  '',
+].join('\n'))
+
+const zodDir = join(tmp, 'node_modules', 'zod')
+await mkdir(zodDir, { recursive: true })
+await writeFile(join(zodDir, 'package.json'), JSON.stringify({ name: 'zod', type: 'module', main: 'index.js' }))
+await writeFile(join(zodDir, 'index.js'), [
+  'export const z = { object: (shape) => ({ shape }), string: () => ({ type: \'string\' }) }',
+  '',
+].join('\n'))
+
 await copyFile(join(root, 'index.mjs'), join(tmp, 'index.mjs'))
 const mod = await import(pathToFileURL(join(tmp, 'index.mjs')).href)
 assert.equal(mod.name, 'deepread')
@@ -118,4 +135,119 @@ try {
 assert.ok(errorMessage.includes('upstream rate limit exceeded'), 'underlying error is preserved in diagnostics: ' + errorMessage)
 assert.ok(errorMessage.includes('3 次'), 'attempt count is reported: ' + errorMessage)
 
-console.log('SMOKE OK: tool registers, callModelJson reachable, quick path executes and renders, config override works, truncation retry grows budget, underlying errors surface')
+// ---- URL 全文缓存场景（storageDomain 领域 KV / 进程内降级） ----
+const CACHE_HTML = '<html><head><title>缓存测试文章</title></head><body><p>这是缓存测试正文第一段。</p><p>第二段内容。</p></body></html>'
+
+function makeDomainTable() {
+  const store = new Map()
+  return {
+    get: (key) => store.get(key),
+    put: async (key, value) => { store.set(key, value) },
+    delete: async (key) => { store.delete(key) },
+    entries: () => store.entries(),
+    keys: () => store.keys(),
+    get size() { return store.size },
+  }
+}
+
+function makeCacheCtx(opts = {}) {
+  const holder = { fetchCalls: 0 }
+  holder.table = makeDomainTable()
+  holder.web = {
+    fetch: async () => {
+      holder.fetchCalls++
+      return { statusCode: 200, body: { kind: 'html', content: CACHE_HTML } }
+    },
+  }
+  const storageDomain = {
+    open: async () => ({ table: () => holder.table, close: async () => {} }),
+  }
+  holder.ctx = {
+    get: (name) => {
+      if (name === 'storageDomain') return opts.withStorage === false ? undefined : storageDomain
+      if (name === 'web') return holder.web
+      return undefined
+    },
+    effect: (fn) => { fn(); return () => {} },
+    llm: {
+      listProviders: () => [{ id: 'fake' }],
+      listModels: async () => ['fake-model'],
+      stream: async function* () {
+        yield { type: 'text-delta', text: fakeJson }
+        yield { type: 'finish', reason: null }
+      },
+    },
+    tools: { register: (t) => { holder.tool = t } },
+  }
+  return holder
+}
+
+// 场景 C1：命中缓存（storageDomain 持久层），第二次不再联网
+{
+  const h = makeCacheCtx()
+  mod.apply(h.ctx, undefined)
+  const r1 = await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none' })
+  assert.equal(r1.meta.cache, 'miss')
+  const r2 = await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none' })
+  assert.equal(r2.meta.cache, 'hit')
+  assert.equal(h.fetchCalls, 1, 'cache hit skips the network fetch')
+}
+
+// 场景 C2：refresh 强制重新抓取
+{
+  const h = makeCacheCtx()
+  mod.apply(h.ctx, undefined)
+  await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none' })
+  const r2 = await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none', refresh: true })
+  assert.equal(r2.meta.cache, 'miss')
+  assert.equal(h.fetchCalls, 2, 'refresh re-fetches even with a warm cache')
+}
+
+// 场景 C3：抓取失败回退缓存，note 说明原因
+{
+  const h = makeCacheCtx()
+  mod.apply(h.ctx, undefined)
+  await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none' })
+  h.web.fetch = async () => { throw new Error('upstream fetch down') }
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => { throw new Error('network disabled in test') }
+  try {
+    const r2 = await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none', refresh: true })
+    assert.equal(r2.meta.cache, 'fallback')
+    assert.ok(String(r2.meta.note).includes('抓取失败'), 'fallback note explains the fetch failure')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+}
+
+// 场景 C4：TTL 过期（cacheTtlHours: 0 等效不缓存）不命中，重新抓取
+{
+  const h = makeCacheCtx()
+  mod.apply(h.ctx, { cacheTtlHours: 0 })
+  await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none' })
+  const r2 = await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none' })
+  assert.equal(r2.meta.cache, 'miss', 'expired entries are not served')
+  assert.equal(h.fetchCalls, 2)
+}
+
+// 场景 C5：缓存禁用（cacheEnabled: false）
+{
+  const h = makeCacheCtx()
+  mod.apply(h.ctx, { cacheEnabled: false })
+  const r1 = await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none' })
+  assert.equal(r1.meta.cache, 'disabled')
+  await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none' })
+  assert.equal(h.fetchCalls, 2)
+}
+
+// 场景 C6：无 storageDomain 服务（headless）→ 进程内缓存降级仍可命中
+{
+  const h = makeCacheCtx({ withStorage: false })
+  mod.apply(h.ctx, undefined)
+  await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none' })
+  const r2 = await h.tool.execute({ url: 'https://mp.weixin.qq.com/s/abc', depth: 'quick', export: 'none' })
+  assert.equal(r2.meta.cache, 'hit', 'in-memory fallback caches within the process')
+  assert.equal(h.fetchCalls, 1)
+}
+
+console.log('SMOKE OK: tool registers, callModelJson reachable, quick path executes and renders, config override works, truncation retry grows budget, underlying errors surface, URL cache (hit/refresh/fallback/ttl/disabled/memory-fallback) all pass')

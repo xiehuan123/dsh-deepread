@@ -1,13 +1,31 @@
 // DeepRead 精读助手 — Node half（官方 bundle 插件 Cordis entry）
-// 依赖 @deepseek-ai/* 由 profile pnpm 闭包注入，不在 package.json 声明。
+// 依赖 @deepseek-ai/* 与 zod 由宿主 profile 树提供（见 package.json peerDependencies）。
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import Schema from '@deepseek-ai/schemastery'
+import { z } from 'zod'
+import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 
 export const Config = Schema.object({
   timeoutMs: Schema.number().default(900000),
   chunkChars: Schema.number().default(6000),
   maxParts: Schema.number().default(20),
   maxInputChars: Schema.number().default(400000),
+  cacheEnabled: Schema.boolean().default(true),
+  cacheTtlHours: Schema.number().default(168),
+})
+
+// URL 抓取全文缓存领域声明：与官方 workspaceDomainSpec 同构——zod schema 即
+// 持久化边界校验，defineDomain 声明领域身份/版本/表；落盘到 $DSH_HOME/storages/。
+const urlCacheRecord = z.object({
+  url: z.string(),
+  text: z.string(),
+  fetchedAt: z.string(), // ISO-8601
+})
+
+const deepreadCacheDomainSpec = defineDomain({
+  name: 'deepread-url-cache',
+  version: 1,
+  tables: { articles: domainTable(z.string(), urlCacheRecord) },
 })
 
 export const name = 'deepread'
@@ -20,10 +38,88 @@ export function apply(ctx, config) {
     chunkChars: num(cfg.chunkChars, 6000),
     maxParts: num(cfg.maxParts, 20),
     maxInputChars: num(cfg.maxInputChars, 400000),
+    cacheEnabled: typeof cfg.cacheEnabled === 'boolean' ? cfg.cacheEnabled : true,
+    cacheTtlHours: typeof cfg.cacheTtlHours === 'number' && Number.isFinite(cfg.cacheTtlHours) && cfg.cacheTtlHours >= 0 ? cfg.cacheTtlHours : 168,
   }
+  const CACHE_TTL_MS = tune.cacheTtlHours * 3600 * 1000
+  const CACHE_MAX_ENTRIES = 200
   const CHUNK_CHARS = tune.chunkChars
   const MAX_PARTS = tune.maxParts
   const web = ctx.get('web')
+
+  // ---- URL 缓存：优先 storageDomain（官方领域 KV，跨进程持久），
+  // 服务缺失（如 headless profile 未挂 storage 组合包）时降级为进程内 Map。
+  const memCache = new Map()
+  let domainHandle = null
+  let cacheTablePromise = null
+  ctx.effect(() => () => { if (domainHandle !== null) void domainHandle.close() })
+
+  function getCacheTable() {
+    if (cacheTablePromise === null) {
+      cacheTablePromise = (async () => {
+        const storageDomain = ctx.get('storageDomain')
+        if (storageDomain === undefined || typeof storageDomain.open !== 'function') return null
+        try {
+          const domain = await storageDomain.open(deepreadCacheDomainSpec)
+          domainHandle = domain
+          return domain.table('articles')
+        } catch (err) {
+          return null // 存储后端不可用：降级为进程内缓存，不影响精读主流程
+        }
+      })()
+    }
+    return cacheTablePromise
+  }
+
+  function isStale(fetchedAt) {
+    const t = Date.parse(fetchedAt)
+    // >= 保证 TTL=0（等效不缓存）在毫秒精度下也是确定过期的
+    return !Number.isFinite(t) || Date.now() - t >= CACHE_TTL_MS
+  }
+
+  async function readCacheEntry(url, ignoreTtl) {
+    const table = await getCacheTable()
+    if (table === null) {
+      const rec = memCache.get(url)
+      if (rec === undefined) return null
+      return ignoreTtl !== true && isStale(rec.fetchedAt) ? null : rec
+    }
+    const rec = table.get(url)
+    if (rec === undefined) return null
+    if (ignoreTtl !== true && isStale(rec.fetchedAt)) {
+      try { await table.delete(url) } catch (err) { /* 过期清理失败无碍 */ }
+      return null
+    }
+    return rec
+  }
+
+  async function writeCacheEntry(url, text) {
+    const rec = { url, text, fetchedAt: new Date().toISOString() }
+    const table = await getCacheTable()
+    if (table === null) {
+      memCache.set(url, rec)
+      return
+    }
+    try {
+      await table.put(url, rec)
+      // 过期清理 + 数量上限（entries() 是内存快照，安全迭代）
+      const expired = []
+      let kept = []
+      for (const [k, v] of table.entries()) {
+        if (isStale(v.fetchedAt)) expired.push(k)
+        else kept.push({ key: k, fetchedAt: v.fetchedAt })
+      }
+      for (const k of expired) { try { await table.delete(k) } catch (err) { /* 清理失败无碍 */ } }
+      if (kept.length > CACHE_MAX_ENTRIES) {
+        kept.sort((a, b) => (a.fetchedAt < b.fetchedAt ? -1 : 1))
+        for (const item of kept.slice(0, kept.length - CACHE_MAX_ENTRIES)) {
+          try { await table.delete(item.key) } catch (err) { /* 清理失败无碍 */ }
+        }
+      }
+    } catch (err) {
+      // 缓存写入失败不影响主流程：静默降级
+    }
+  }
 
   function str(v, fallback) {
     return typeof v === 'string' && v.trim() !== '' ? v.trim() : fallback
@@ -829,6 +925,63 @@ export function apply(ctx, config) {
     return { title, text: content }
   }
 
+  // 抓取并提取微信公众号正文：web 服务优先、全局 fetch 兜底、反爬验证页换 UA
+  // 重试一次、标题前置。任何失败以异常上抛，由 resolveSource 决定回退缓存还是透传。
+  async function fetchArticleText(url) {
+    let result = null
+    let webError = null
+    if (web !== undefined) {
+      try {
+        result = await web.fetch({ url })
+      } catch (err) {
+        webError = err
+      }
+    }
+    if (result === null || typeof result !== 'object' || typeof result.statusCode !== 'number') {
+      // 回退：web 服务无可用 provider 时用 Node 全局 fetch 兜底
+      try {
+        const resp = await globalThis.fetch(url, {
+          redirect: 'follow',
+          headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36' },
+        })
+        const bodyText = await resp.text()
+        result = { statusCode: resp.status, body: { kind: 'html', content: bodyText } }
+      } catch (err) {
+        const reason = webError !== null && typeof webError === 'object' && typeof webError.message === 'string' ? webError.message : String(err)
+        throw new Error('网页抓取失败：' + reason)
+      }
+    }
+    if (result.statusCode < 200 || result.statusCode >= 300) throw new Error('网页返回状态码 ' + result.statusCode + '，抓取失败')
+    const body = result.body
+    let contentText = ''
+    let pageTitle = ''
+    if (body !== null && typeof body === 'object' && body.kind === 'text' && typeof body.content === 'string') {
+      contentText = body.content
+    } else if (body !== null && typeof body === 'object' && body.kind === 'html' && typeof body.content === 'string') {
+      const parsed = htmlToText(body.content)
+      pageTitle = parsed.title
+      contentText = parsed.text
+    }
+    if (contentText.trim() === '') throw new Error('网页内容为空或无法解析（可能是临时链接失效、文章已删除，或需要登录）。请换稳定链接，或直接粘贴正文。')
+    // 微信反爬验证页（环境异常/去验证）不是正文：换浏览器 UA 走全局 fetch 重试一次
+    const looksAntiBot = /环境异常|完成验证|去验证/.test(contentText) && contentText.length < 4000
+    if (looksAntiBot) {
+      try {
+        const resp = await globalThis.fetch(url, {
+          redirect: 'follow',
+          headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36' },
+        })
+        const retried = htmlToText(await resp.text())
+        if (retried.text.trim() !== '' && !/环境异常|完成验证|去验证/.test(retried.text)) {
+          contentText = retried.text
+          if (retried.title !== '') pageTitle = retried.title
+        }
+      } catch (err) { /* 保留原内容，交给后续模型处理 */ }
+    }
+    if (pageTitle !== '' && contentText.indexOf(pageTitle) === -1) contentText = pageTitle + '\n\n' + contentText
+    return contentText
+  }
+
   async function resolveSource(args) {
     const url = typeof args.url === 'string' ? args.url.trim() : ''
     const path = typeof args.path === 'string' ? args.path.trim() : ''
@@ -839,58 +992,31 @@ export function apply(ctx, config) {
       if (host !== 'mp.weixin.qq.com' && host !== 'weixin.qq.com' && !host.endsWith('.weixin.qq.com')) {
         throw new Error('链接抓取仅支持微信公众号（mp.weixin.qq.com）。' + (host === '' ? '不是有效的链接。' : '「' + host + '」存在反爬或登录墙，请直接粘贴正文，或将内容保存为 .txt/.md/.pdf 后用 path 传入。'))
       }
-      let result = null
-      let webError = null
-      if (web !== undefined) {
-        try {
-          result = await web.fetch({ url })
-        } catch (err) {
-          webError = err
-        }
+      const refresh = args.refresh === true
+      if (tune.cacheEnabled && !refresh) {
+        const hit = await readCacheEntry(url, false)
+        if (hit !== null) return { text: hit.text, source: url, sourceKind: 'url', cache: 'hit', fetchedAt: hit.fetchedAt }
       }
-      if (result === null || typeof result !== 'object' || typeof result.statusCode !== 'number') {
-        // 回退：web 服务无可用 provider 时用 Node 全局 fetch 兜底
-        try {
-          const resp = await globalThis.fetch(url, {
-            redirect: 'follow',
-            headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36' },
-          })
-          const bodyText = await resp.text()
-          result = { statusCode: resp.status, body: { kind: 'html', content: bodyText } }
-        } catch (err) {
-          const reason = webError !== null && typeof webError === 'object' && typeof webError.message === 'string' ? webError.message : String(err)
-          throw new Error('网页抓取失败：' + reason)
-        }
-      }
-      if (result.statusCode < 200 || result.statusCode >= 300) throw new Error('网页返回状态码 ' + result.statusCode + '，抓取失败')
-      const body = result.body
       let contentText = ''
-      let pageTitle = ''
-      if (body !== null && typeof body === 'object' && body.kind === 'text' && typeof body.content === 'string') {
-        contentText = body.content
-      } else if (body !== null && typeof body === 'object' && body.kind === 'html' && typeof body.content === 'string') {
-        const parsed = htmlToText(body.content)
-        pageTitle = parsed.title
-        contentText = parsed.text
+      let fetchError = null
+      try {
+        contentText = await fetchArticleText(url)
+      } catch (err) {
+        fetchError = err
       }
-      if (contentText.trim() === '') throw new Error('网页内容为空或无法解析（可能是临时链接失效、文章已删除，或需要登录）。请换稳定链接，或直接粘贴正文。')
-      // 微信反爬验证页（环境异常/去验证）不是正文：换浏览器 UA 走全局 fetch 重试一次
-      const looksAntiBot = /环境异常|完成验证|去验证/.test(contentText) && contentText.length < 4000
-      if (looksAntiBot) {
-        try {
-          const resp = await globalThis.fetch(url, {
-            redirect: 'follow',
-            headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36' },
-          })
-          const retried = htmlToText(await resp.text())
-          if (retried.text.trim() !== '' && !/环境异常|完成验证|去验证/.test(retried.text)) {
-            contentText = retried.text
-            if (retried.title !== '') pageTitle = retried.title
+      if (fetchError !== null) {
+        if (tune.cacheEnabled) {
+          const stale = await readCacheEntry(url, true)
+          if (stale !== null) {
+            const reason = fetchError !== null && typeof fetchError === 'object' && fetchError.message ? fetchError.message : String(fetchError)
+            return { text: stale.text, source: url, sourceKind: 'url', cache: 'fallback', fetchedAt: stale.fetchedAt, note: '抓取失败（' + reason + '），已回退缓存全文' }
           }
-        } catch (err) { /* 保留原内容，交给后续模型处理 */ }
+        }
+        throw fetchError
       }
-      if (pageTitle !== '' && contentText.indexOf(pageTitle) === -1) contentText = pageTitle + '\n\n' + contentText
-      return { text: contentText, source: url, sourceKind: 'url' }
+      const looksAntiBot = /环境异常|完成验证|去验证/.test(contentText) && contentText.length < 4000
+      if (tune.cacheEnabled && !looksAntiBot) await writeCacheEntry(url, contentText)
+      return { text: contentText, source: url, sourceKind: 'url', cache: tune.cacheEnabled ? 'miss' : 'disabled' }
     }
     if (path !== '') {
       const lower = path.toLowerCase()
@@ -1212,6 +1338,11 @@ export function apply(ctx, config) {
     let text = String(src.text).replace(/\r\n/g, '\n')
     const source = src.source
     const sourceKind = src.sourceKind
+    const cacheFields = {
+      ...(typeof src.cache === 'string' ? { cache: src.cache } : {}),
+      ...(typeof src.fetchedAt === 'string' ? { fetchedAt: src.fetchedAt } : {}),
+      ...(typeof src.note === 'string' && src.note !== '' ? { note: src.note } : {}),
+    }
     if (text.trim() === '') throw new Error('没有可分析的内容')
     if (text.length > tune.maxInputChars) text = text.slice(0, tune.maxInputChars)
 
@@ -1226,7 +1357,7 @@ export function apply(ctx, config) {
         kind: 'article', title: s.title, summary: s.summary, thesis: s.thesis,
         arguments: s.arguments, quotes: s.quotes, concepts: s.concepts, questions: s.questions,
         structure: [], chapters: [],
-        meta: { source, sourceKind, chars: limited.length, chunks: 1, depth: 'quick', durationMs: Date.now() - started },
+        meta: { ...cacheFields, source, sourceKind, chars: limited.length, chunks: 1, depth: 'quick', durationMs: Date.now() - started },
       }
     }
 
@@ -1234,7 +1365,7 @@ export function apply(ctx, config) {
       if (text.length <= 9000) {
         const parsed = await callModelJson(cfg, mapSystem(language, focus, false), mapUser(text), 5000)
         if (parsed === null) throw new Error('模型输出无法解析为 JSON，请重试')
-        return sanitizeMap(parsed, [], { source, sourceKind, chars: text.length, chunks: 1, depth: 'map', durationMs: Date.now() - started })
+        return sanitizeMap(parsed, [], { ...cacheFields, source, sourceKind, chars: text.length, chunks: 1, depth: 'map', durationMs: Date.now() - started })
       }
       const chapters = []
       let parts = splitChunks(text, CHUNK_CHARS)
@@ -1247,7 +1378,7 @@ export function apply(ctx, config) {
       const condensed = chapters.map((c) => ({ title: c.title, summary: c.summary, thesis: c.thesis, arguments: c.arguments.slice(0, 3) }))
       const finalParsed = await callModelJson(cfg, mapSystem(language, focus, true), mapFinalUser(condensed, text.length), 5000)
       if (finalParsed === null) throw new Error('模型输出无法解析为 JSON，请重试')
-      return sanitizeMap(finalParsed, chapters, { source, sourceKind, chars: text.length, chunks: chapters.length, depth: 'map', durationMs: Date.now() - started })
+      return sanitizeMap(finalParsed, chapters, { ...cacheFields, source, sourceKind, chars: text.length, chunks: chapters.length, depth: 'map', durationMs: Date.now() - started })
     }
 
     if (depth === 'feynman') {
@@ -1293,7 +1424,7 @@ export function apply(ctx, config) {
         concepts: [],
         structure: [],
         chapters: [],
-        meta: { source, sourceKind, chars: text.length, chunks: feynmanChapters.length, depth: 'feynman', durationMs: Date.now() - started },
+        meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: feynmanChapters.length, depth: 'feynman', durationMs: Date.now() - started },
       }
     }
 
@@ -1325,7 +1456,7 @@ export function apply(ctx, config) {
           title: first.title, summary: first.summary, thesis: first.thesis,
           arguments: first.arguments, quotes: first.quotes, concepts: [], questions: [],
           structure: [], chapters,
-          meta: { source, sourceKind, chars: text.length, chunks: chapters.length, depth, durationMs: Date.now() - started, note: '综合阶段输出解析失败，已回退为各部分要点' },
+          meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: chapters.length, depth, durationMs: Date.now() - started, note: (typeof src.note === 'string' && src.note !== '' ? src.note + '；' : '') + '综合阶段输出解析失败，已回退为各部分要点' },
         }
       }
       throw new Error('模型输出无法解析为 JSON，请重试')
@@ -1338,8 +1469,22 @@ export function apply(ctx, config) {
       title: fin.title, summary: fin.summary, thesis: fin.thesis,
       arguments: fin.arguments, quotes: fin.quotes, concepts: fin.concepts, questions: fin.questions,
       structure, chapters,
-      meta: { source, sourceKind, chars: text.length, chunks: chunked ? chapters.length : 1, depth, durationMs: Date.now() - started },
+      meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: chunked ? chapters.length : 1, depth, durationMs: Date.now() - started },
     }
+  }
+
+  function cacheLabel(meta) {
+    const fetched = typeof meta.fetchedAt === 'string' ? meta.fetchedAt.replace('T', ' ').slice(0, 16) : ''
+    if (meta.cache === 'hit') return '缓存命中（抓取于 ' + fetched + '，未重新联网）'
+    if (meta.cache === 'fallback') return '回退缓存（抓取于 ' + fetched + '）'
+    if (meta.cache === 'miss') return '已重新抓取并写入缓存'
+    if (meta.cache === 'disabled') return '缓存已禁用'
+    return ''
+  }
+
+  function metaFooter(meta) {
+    const cacheText = cacheLabel(meta)
+    return '（来源：' + str(meta.source, '粘贴文本') + ' · 字数：' + (typeof meta.chars === 'number' ? meta.chars : 0) + ' · 深度：' + str(meta.depth, 'deep') + (cacheText !== '' ? ' · ' + cacheText : '') + '）'
   }
 
   function renderFeynmanMarkdown(v) {
@@ -1383,6 +1528,7 @@ export function apply(ctx, config) {
         lines.push('- **' + str(ro.interval, '') + '**：' + str(ro.focus, '') + (str(ro.method, '') !== '' ? '（' + ro.method + '）' : ''))
       })
     }
+    lines.push('', '---', '', metaFooter(v.meta !== null && typeof v.meta === 'object' ? v.meta : {}))
     return lines.join('\n')
   }
 
@@ -1428,6 +1574,7 @@ export function apply(ctx, config) {
       lines.push('', '**主动回忆问题**：')
       qs.forEach((q, i) => lines.push((i + 1) + '. ' + q))
     }
+    lines.push('', '---', '', metaFooter(v.meta !== null && typeof v.meta === 'object' ? v.meta : {}))
     return lines.join('\n')
   }
 
@@ -1465,7 +1612,7 @@ export function apply(ctx, config) {
       qs.forEach((q) => lines.push('- ' + q))
     }
     const meta = v.meta !== null && typeof v.meta === 'object' ? v.meta : {}
-    lines.push('', '---', '', '（来源：' + str(meta.source, '粘贴文本') + ' · 字数：' + (typeof meta.chars === 'number' ? meta.chars : 0) + ' · 深度：' + str(meta.depth, 'deep') + '）')
+    lines.push('', '---', '', metaFooter(meta))
     return lines.join('\n')
   }
 
@@ -1833,7 +1980,7 @@ export function apply(ctx, config) {
 
   const tool = defineTool({
     name: 'deepread',
-    description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。五种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；feynman=费曼读书法（浏览目录→提出问题→分章阅读→提取观点数据证据→章节导图→合上书讲解→自检知识缺口→回原文修正→合并全书导图→再讲一次→间隔复习计划）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）。知乎/掘金等反爬站点请粘贴正文。',
+    description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。五种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；feynman=费曼读书法（浏览目录→提出问题→分章阅读→提取观点数据证据→章节导图→合上书讲解→自检知识缺口→回原文修正→合并全书导图→再讲一次→间隔复习计划）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）。知乎/掘金等反爬站点请粘贴正文。同一链接抓取过的全文会写入本地缓存（默认 7 天），换模式重读同一篇文章不再重新联网抓取；refresh=true 可强制重新抓取。',
     timeoutMs: tune.timeoutMs,
     parameters: {
       url: { type: 'string', description: '要精读的网页链接。仅支持微信公众号（mp.weixin.qq.com）的稳定链接；知乎/掘金等有反爬的站点不支持，请粘贴正文。与 path/text 至少提供一个。' },
@@ -1841,6 +1988,7 @@ export function apply(ctx, config) {
       path: { type: 'string', description: '工作区内要精读的文件路径，支持 .txt/.md/.markdown/.html 与 .pdf，如 "notes/第一章.md" 或 "book.pdf"。' },
       depth: { type: 'string', enum: ['quick', 'deep', 'map', 'feynman', 'book'], default: 'deep', description: '精读模式。quick=快速抓要点；deep=深度精读（默认，长文自动分段）；map=「观点—证据—数据—关系」知识地图；feynman=费曼读书法（11 步闭环：目录→提问→分章→观点数据证据→章节导图→合上书讲解→找缺口→回原文修正→合并导图→再讲一次→间隔复习）；book=整本书分部分精读并汇总。' },
       export: { type: 'string', enum: ['none', 'md', 'mm', 'html', 'all'], default: 'none', description: '导出格式。none=不落盘，仅在会话中展示（默认）；md=导出 Markdown 报告；mm=导出 FreeMind 思维导图（XMind 可导入）；html=导出网页报告；all=三种全部导出。' },
+      refresh: { type: 'boolean', default: false, description: '强制重新抓取并刷新缓存（默认 false：同一链接命中缓存时直接复用已抓取的全文，不再联网）。' },
       focus: { type: 'string', description: '读者特别关注的角度，例如"论证逻辑""研究方法""与既有理论的关系"。' },
       language: { type: 'string', enum: ['zh', 'en', 'auto'], default: 'auto', description: '报告输出语言，默认 auto（跟随原文）。' },
     },
