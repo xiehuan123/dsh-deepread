@@ -23,11 +23,14 @@ export function apply(ctx) {
   function parseJson(text) {
     let cleaned = String(text).trim()
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
-    try { return JSON.parse(cleaned) } catch (error) { /* keep going */ }
+    const attempts = [cleaned]
     const start = cleaned.indexOf('{')
     const end = cleaned.lastIndexOf('}')
-    if (start >= 0 && end > start) {
-      try { return JSON.parse(cleaned.slice(start, end + 1)) } catch (error) { /* keep going */ }
+    if (start >= 0 && end > start) attempts.push(cleaned.slice(start, end + 1))
+    for (const candidate of attempts) {
+      try { return JSON.parse(candidate) } catch (error) { /* keep going */ }
+      // 常见模型输出毛病：数组/对象末尾的尾随逗号
+      try { return JSON.parse(candidate.replace(/,\s*([}\]])/g, '$1')) } catch (error) { /* keep going */ }
     }
     return null
   }
@@ -118,6 +121,20 @@ export function apply(ctx) {
     if (failure !== null) throw new Error('模型调用失败：' + failure)
     if (text.trim() === '') throw new Error('模型返回了空结果')
     return text
+
+  // 带重试的 JSON 调用：解析失败时追加校正提示重试（最多 2 次重试）
+  async function callModelJson(cfg, system, userText, maxTokens) {
+    let lastParsed = null
+    let prompt = userText
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const text = await callModel(cfg, system, prompt, maxTokens)
+      const parsed = parseJson(text)
+      if (parsed !== null) return parsed
+      lastParsed = parsed
+      prompt = userText + '\n\n[系统校正] 你上一次的输出无法解析为 JSON（可能混入了解释文字、Markdown 围栏或尾随逗号）。请重新只输出一个合法的 JSON 对象，不要任何解释或额外文字，字符串内引号正确转义，末尾不要有逗号。'
+    }
+    return lastParsed
+  }
   }
 
   // ---------- PDF 文本提取（纯 JS：inflate + ToUnicode） ----------
@@ -1127,7 +1144,7 @@ export function apply(ctx) {
 
     if (depth === 'quick') {
       const limited = text.length > 30000 ? text.slice(0, 30000) : text
-      const parsed = parseJson(await callModel(cfg, sectionSystem('quick', language, focus), sectionUser(limited, 0, 1), 2500))
+      const parsed = await callModelJson(cfg, sectionSystem('quick', language, focus), sectionUser(limited, 0, 1), 2500)
       if (parsed === null) throw new Error('模型输出无法解析为 JSON，请重试')
       const s = sanitizeSection(parsed, '未命名内容')
       return {
@@ -1140,7 +1157,7 @@ export function apply(ctx) {
 
     if (depth === 'map') {
       if (text.length <= 9000) {
-        const parsed = parseJson(await callModel(cfg, mapSystem(language, focus, false), mapUser(text), 5000))
+        const parsed = await callModelJson(cfg, mapSystem(language, focus, false), mapUser(text), 5000)
         if (parsed === null) throw new Error('模型输出无法解析为 JSON，请重试')
         return sanitizeMap(parsed, [], { source, sourceKind, chars: text.length, chunks: 1, depth: 'map', durationMs: Date.now() - started })
       }
@@ -1148,12 +1165,12 @@ export function apply(ctx) {
       let parts = splitChunks(text, CHUNK_CHARS)
       if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS)
       for (let i = 0; i < parts.length; i++) {
-        const parsed = parseJson(await callModel(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 3000))
+        const parsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 4000)
         const s = sanitizeSection(parsed === null ? {} : parsed, '第 ' + (i + 1) + ' 部分')
         chapters.push({ title: s.title, summary: s.summary, thesis: s.thesis, arguments: s.arguments, quotes: s.quotes })
       }
       const condensed = chapters.map((c) => ({ title: c.title, summary: c.summary, thesis: c.thesis, arguments: c.arguments.slice(0, 3) }))
-      const finalParsed = parseJson(await callModel(cfg, mapSystem(language, focus, true), mapFinalUser(condensed, text.length), 5000))
+      const finalParsed = await callModelJson(cfg, mapSystem(language, focus, true), mapFinalUser(condensed, text.length), 5000)
       if (finalParsed === null) throw new Error('模型输出无法解析为 JSON，请重试')
       return sanitizeMap(finalParsed, chapters, { source, sourceKind, chars: text.length, chunks: chapters.length, depth: 'map', durationMs: Date.now() - started })
     }
@@ -1163,7 +1180,7 @@ export function apply(ctx) {
       let toc = []
       let questions = []
       if (isBook) {
-        const structParsed = parseJson(await callModel(cfg, feynmanStructSystem(language), '请浏览目录并提出阅读问题：\n\n' + text.slice(0, 5000), 2500))
+        const structParsed = await callModelJson(cfg, feynmanStructSystem(language), '请浏览目录并提出阅读问题：\n\n' + text.slice(0, 5000), 2500)
         if (structParsed !== null) {
           toc = arr(structParsed.toc).slice(0, 30).map((x) => String(x).trim()).filter((x) => x !== '')
           questions = arr(structParsed.questions).slice(0, 6).map((x) => String(x).trim()).filter((x) => x !== '')
@@ -1173,11 +1190,11 @@ export function apply(ctx) {
       if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS)
       const feynmanChapters = []
       for (let i = 0; i < parts.length; i++) {
-        const parsed = parseJson(await callModel(cfg, feynmanChapterSystem(language, focus), feynmanChapterUser(parts[i], i + 1, parts.length), 5000))
+        const parsed = await callModelJson(cfg, feynmanChapterSystem(language, focus), feynmanChapterUser(parts[i], i + 1, parts.length), 5000)
         feynmanChapters.push(sanitizeFeynmanChapter(parsed, i + 1))
       }
       const compact = feynmanChapters.map((c) => ({ title: c.title, points: c.points.slice(0, 3), explanation: c.explanation.slice(0, 300) }))
-      const finalParsed = parseJson(await callModel(cfg, feynmanFinalSystem(language), feynmanFinalUser(compact), 5000))
+      const finalParsed = await callModelJson(cfg, feynmanFinalSystem(language), feynmanFinalUser(compact), 5000)
       const fp = finalParsed !== null && typeof finalParsed === 'object' ? finalParsed : {}
       const reviewPlan = arr(fp.reviewPlan).slice(0, 5).map((r) => {
         const ro = r !== null && typeof r === 'object' ? r : { interval: String(r) }
@@ -1211,7 +1228,7 @@ export function apply(ctx) {
       let parts = splitChunks(text, CHUNK_CHARS)
       if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS)
       for (let i = 0; i < parts.length; i++) {
-        const parsed = parseJson(await callModel(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 3000))
+        const parsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 4000)
         const s = sanitizeSection(parsed === null ? {} : parsed, '第 ' + (i + 1) + ' 部分')
         chapters.push({ title: s.title, summary: s.summary, thesis: s.thesis, arguments: s.arguments, quotes: s.quotes })
       }
@@ -1220,9 +1237,9 @@ export function apply(ctx) {
     let finalParsed = null
     if (chapters.length > 0) {
       const parts = chapters.map((c) => ({ title: c.title, summary: c.summary, thesis: c.thesis, arguments: c.arguments.slice(0, 3) }))
-      finalParsed = parseJson(await callModel(cfg, finalSystem(language), finalUserFromParts(parts, text.length), 4000))
+      finalParsed = await callModelJson(cfg, finalSystem(language), finalUserFromParts(parts, text.length), 4000)
     } else {
-      finalParsed = parseJson(await callModel(cfg, sectionSystem('deep', language, focus), sectionUser(text, 0, 1), 3500))
+      finalParsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(text, 0, 1), 3500)
     }
 
     if (finalParsed === null) {

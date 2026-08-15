@@ -1,6 +1,6 @@
 {
   "name": "dsh-deepread",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "DeepRead 精读助手：五种精读模式（快速/深度/知识地图/费曼读书法/全书），提取核心观点、论证结构与关键论据，可选导出 MD / FreeMind 思维导图 / 网页报告。Deep-reading assistant: five modes to extract core claims, arguments and evidence from books and articles.",
   "author": {
     "name": "xiehuan123",
