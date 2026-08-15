@@ -17,7 +17,7 @@
   "scripts": {
     "build:client": "node scripts/build-client.mjs",
     "prepack": "node scripts/build-client.mjs",
-    "test": "node test/smoke.mjs && node test/client-bundle.mjs && node test/pdf-objstm.mjs"
+    "test": "node test/smoke.mjs && node test/client-bundle.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs"
   },
   "dsh": {
     "bundle": {
