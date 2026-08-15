@@ -33,6 +33,8 @@ const React = require("react")
       '.dr-concept-expl { color: var(--dsw-alias-label-secondary); }',
       '.dr-note { color: var(--dsw-alias-label-secondary); font-size: 12px; margin-top: 6px; }',
       '.dr-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; margin-top: 6px; }',
+      '.dr-budget { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.5; }',
+      '.dr-job-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; padding: 4px 8px; margin: 4px 0; word-break: break-all; overflow-wrap: anywhere; }',
       '.dr-map-item { border-left: 2px solid var(--dsw-alias-border-l2); padding-left: 8px; margin: 8px 0; }',
       '.dr-map-claim { font-weight: 600; color: var(--dsw-alias-label-primary); }',
       '.dr-evidence { color: var(--dsw-alias-label-secondary); font-size: 12px; }',
@@ -98,6 +100,96 @@ const React = require("react")
     const TYPE_ORDER = ['核心结论', '分论点', '原因或作用机制', '事实', '数据', '案例', '隐含前提', '反对意见', '限制条件', '可执行建议']
     const CONF_CLASS = { '作者原意': 'dr-conf-author', '原文事实与数据': 'dr-conf-fact', '合理推断': 'dr-conf-infer', '无法确认': 'dr-conf-unknown' }
     const CONF_ORDER = ['作者原意', '原文事实与数据', '合理推断', '无法确认']
+
+    // ---------- 预算估算（镜像 host buildEstimate，纯客户端即时预览） ----------
+    const EST_PROMPT_OVERHEAD = 600
+    const EST_CHUNK_CHARS = 6000
+    const EST_MAX_PARTS = 20
+    const EST_MAX_INPUT_CHARS = 400000
+    const CALIB_KEY = 'dsh-deepread-calib'
+
+    function estimateTokens(text) {
+      let cjk = 0
+      let latin = 0
+      let other = 0
+      for (let i = 0; i < text.length; i++) {
+        const c = text.charCodeAt(i)
+        if ((c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3000 && c <= 0x303f) || (c >= 0xff00 && c <= 0xffef)) cjk++
+        else if (c >= 32 && c < 127) latin++
+        else other++
+      }
+      return Math.ceil(cjk * 0.6 + latin * 0.25 + other * 0.5)
+    }
+
+    function estimateCall(calls, inputTokens, outputTokens, rate, latency) {
+      const totalTokens = inputTokens + outputTokens
+      const minutes = Math.round(((totalTokens / rate / 60) + (calls * latency / 60000)) * 10) / 10
+      return { calls: calls, inputTokens: inputTokens, outputTokens: outputTokens, totalTokens: totalTokens, minutes: minutes }
+    }
+
+    function estimateModes(text, rate, latency) {
+      const chars = text.length
+      const tokOf = (len) => estimateTokens(text.slice(0, len))
+      const effectiveLen = chars > EST_MAX_INPUT_CHARS ? EST_MAX_INPUT_CHARS : chars
+      const parts = Math.min(Math.ceil(effectiveLen / EST_CHUNK_CHARS), EST_MAX_PARTS)
+      const perInput = tokOf(effectiveLen > EST_CHUNK_CHARS ? EST_CHUNK_CHARS : effectiveLen) + EST_PROMPT_OVERHEAD
+      const summaryInput = parts * 400 + EST_PROMPT_OVERHEAD
+      const quick = estimateCall(1, tokOf(Math.min(effectiveLen, 30000)) + EST_PROMPT_OVERHEAD, 2500, rate, latency)
+      const deep = effectiveLen <= 9000
+        ? estimateCall(1, tokOf(effectiveLen) + EST_PROMPT_OVERHEAD, 4000, rate, latency)
+        : estimateCall(parts + 1, parts * perInput + summaryInput, parts * 5000 + 5000, rate, latency)
+      const bookParts = Math.max(1, parts)
+      const book = estimateCall(bookParts + 1, bookParts * perInput + summaryInput, bookParts * 5000 + 5000, rate, latency)
+      const map = effectiveLen <= 9000
+        ? estimateCall(1, tokOf(effectiveLen) + EST_PROMPT_OVERHEAD, 5000, rate, latency)
+        : estimateCall(parts + 1, parts * perInput + summaryInput, parts * 5000 + 5000, rate, latency)
+      const feynmanStruct = effectiveLen > 9000 ? 1 : 0
+      const structInput = feynmanStruct > 0 ? tokOf(5000) + EST_PROMPT_OVERHEAD : 0
+      const feynman = estimateCall(Math.max(1, parts) + feynmanStruct + 1, Math.max(1, parts) * perInput + structInput + summaryInput, Math.max(1, parts) * 5000 + 5000, rate, latency)
+      return { quick: quick, deep: deep, book: book, map: map, feynman: feynman }
+    }
+
+    function formatTokens(n) {
+      if (typeof n !== 'number' || !isFinite(n)) return '≈? token'
+      if (n >= 1000) {
+        const k = Math.round(n / 100) / 10
+        return '≈' + k + 'k token'
+      }
+      return '≈' + n + ' token'
+    }
+
+    function formatMinutes(m) {
+      if (typeof m !== 'number' || !isFinite(m)) return '≈?分钟'
+      if (m < 1) return '≈<1分钟'
+      if (m >= 60) {
+        const h = Math.round(m / 6) / 10
+        return '≈' + h + '小时'
+      }
+      return '≈' + m + '分钟'
+    }
+
+    function readCalibration() {
+      if (typeof localStorage === 'undefined') return { rate: 30, latency: 800 }
+      try {
+        const raw = localStorage.getItem(CALIB_KEY)
+        if (raw === null || raw === '') return { rate: 30, latency: 800 }
+        const parsed = JSON.parse(raw)
+        const rate = parsed !== null && typeof parsed === 'object' && typeof parsed.rate === 'number' && isFinite(parsed.rate) && parsed.rate > 0 ? parsed.rate : 30
+        const latency = parsed !== null && typeof parsed === 'object' && typeof parsed.latency === 'number' && isFinite(parsed.latency) && parsed.latency > 0 ? parsed.latency : 800
+        return { rate: rate, latency: latency }
+      } catch (err) {
+        return { rate: 30, latency: 800 }
+      }
+    }
+
+    function writeCalibration(rate, latency) {
+      if (typeof localStorage === 'undefined') return
+      try {
+        localStorage.setItem(CALIB_KEY, JSON.stringify({ rate: rate, latency: latency }))
+      } catch (err) {
+        // localStorage 不可用或写入失败：静默忽略
+      }
+    }
 
     function badge(text) {
       return React.createElement('span', { className: 'dr-badge' }, text)
@@ -422,16 +514,42 @@ const React = require("react")
       )
     }
 
+    function BackgroundCard(props) {
+      const v = props.value !== null && typeof props.value === 'object' ? props.value : {}
+      const meta = v.meta !== null && typeof v.meta === 'object' ? v.meta : {}
+      const depthLabel = meta.depth === 'batch' ? '批量精读' : (DEPTH_LABELS[meta.depth] !== undefined ? DEPTH_LABELS[meta.depth] : null)
+      const kindLabel = KIND_LABELS[meta.sourceKind] !== undefined ? KIND_LABELS[meta.sourceKind] : null
+      return React.createElement('div', { className: 'dr-card' },
+        React.createElement('div', { className: 'dr-title' }, '⏳ 后台精读已启动'),
+        React.createElement('div', { className: 'dr-badges' },
+          kindLabel !== null ? badge(kindLabel) : null,
+          depthLabel !== null ? badge(depthLabel) : null,
+        ),
+        typeof v.jobId === 'string' && v.jobId !== '' ? React.createElement('div', { className: 'dr-job-id' }, v.jobId) : null,
+        typeof v.label === 'string' && v.label !== '' ? React.createElement('div', { className: 'dr-source' }, v.label) : null,
+        React.createElement('div', { className: 'dr-note' }, '用 job_output 读取进度与最终报告；job_kill 可取消'),
+      )
+    }
+
     function DeepReadCard(props) {
       const block = props.block
       const value = block !== null && typeof block === 'object' && block.meta !== null && typeof block.meta === 'object' ? block.meta : null
       React.useEffect(() => {
         if (value === null) return
         if (value.kind === 'estimate') return
+        if (value.kind === 'background') return
+        const meta = value.meta !== null && typeof value.meta === 'object' ? value.meta : {}
+        const est = meta.estimate !== null && typeof meta.estimate === 'object' ? meta.estimate : null
+        if (est !== null) {
+          const rate = typeof est.estTokensPerSecond === 'number' ? est.estTokensPerSecond : null
+          const latency = typeof est.estLatencyPerCallMs === 'number' ? est.estLatencyPerCallMs : null
+          if ((rate !== null && latency !== null) || est.calibrated === true) {
+            writeCalibration(rate !== null ? rate : 30, latency !== null ? latency : 800)
+          }
+        }
         if (!historyKindAllowed(value.kind)) return
         const title = typeof value.title === 'string' ? value.title : ''
         if (title === '') return
-        const meta = value.meta !== null && typeof value.meta === 'object' ? value.meta : {}
         const source = typeof meta.source === 'string' ? meta.source : ''
         writeHistory({
           id: String(source) + '|' + value.kind + '|' + title,
@@ -458,6 +576,9 @@ const React = require("react")
       const meta = block.meta !== null && typeof block.meta === 'object' ? block.meta : null
       if (meta === null) {
         return React.createElement('div', { className: 'dr-card' }, React.createElement('div', { className: 'dr-note' }, '精读已完成，请查看上方对话中的分析。'))
+      }
+      if (meta.kind === 'background') {
+        return React.createElement(BackgroundCard, { value: meta })
       }
       return React.createElement('div', { className: 'dr-card' }, React.createElement(Sections, { value: meta }))
     }
@@ -538,12 +659,17 @@ const React = require("react")
         setOpen(false)
       }
 
-      const depthOption = (value, label) => React.createElement('button', {
-        type: 'button',
-        className: 'dr-depth' + (depth === value ? ' dr-depth-on' : ''),
-        key: value,
-        onClick: () => setDepth(value),
-      }, label)
+      const depthOption = (value) => {
+        const full = DEPTH_LABELS[value] !== undefined ? DEPTH_LABELS[value] : value
+        const est = budgetModes !== null && budgetModes[value] !== undefined ? budgetModes[value] : null
+        const label = est !== null ? full + ' (' + formatTokens(est.totalTokens) + ' · ' + formatMinutes(est.minutes) + ')' : full
+        return React.createElement('button', {
+          type: 'button',
+          className: 'dr-depth' + (depth === value ? ' dr-depth-on' : ''),
+          key: value,
+          onClick: () => setDepth(value),
+        }, label)
+      }
 
       const exportOption = (value, label) => React.createElement('button', {
         type: 'button',
@@ -557,6 +683,18 @@ const React = require("react")
           setText(item.source)
         }
         if (panelRef.current !== null && panelRef.current !== undefined) panelRef.current.scrollTop = 0
+      }
+
+      // 预算汇总：文本输入非空时实时计算；仅链接/路径时提示开始后计算；全空时提示输入内容。
+      const calib = readCalibration()
+      const hasText = text.trim() !== ''
+      const hasTarget = url.trim() !== '' || path.trim() !== ''
+      const budgetModes = hasText ? estimateModes(text, calib.rate, calib.latency) : null
+      let budgetLine = '预算：输入内容后自动计算'
+      if (budgetModes !== null && budgetModes[depth] !== undefined) {
+        budgetLine = '预算：' + formatTokens(budgetModes[depth].totalTokens) + ' · ' + formatMinutes(budgetModes[depth].minutes)
+      } else if (hasTarget) {
+        budgetLine = '预算：开始后自动计算'
       }
 
       return React.createElement('div', { className: 'dr-panel', ref: panelRef },
@@ -589,13 +727,14 @@ const React = require("react")
             history.map((item, i) => React.createElement(HistoryItem, { item: item, onReread: reread, key: 'h-' + i })),
           ),
         ),
+        React.createElement('div', { className: 'dr-budget' }, budgetLine),
         React.createElement('div', { className: 'dr-row' },
           React.createElement('span', { className: 'dr-label' }, '深度'),
-          depthOption('quick', '快速'),
-          depthOption('deep', '深度'),
-          depthOption('map', '知识地图'),
-          depthOption('feynman', '费曼'),
-          depthOption('book', '全书'),
+          depthOption('quick'),
+          depthOption('deep'),
+          depthOption('map'),
+          depthOption('feynman'),
+          depthOption('book'),
         ),
         React.createElement('div', { className: 'dr-row' },
           React.createElement('span', { className: 'dr-label' }, '导出'),

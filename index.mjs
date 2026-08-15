@@ -14,6 +14,7 @@ export const Config = Schema.object({
   cacheTtlHours: Schema.number().default(168),
   estTokensPerSecond: Schema.number().default(30),
   estLatencyPerCallMs: Schema.number().default(800),
+  backgroundMinChars: Schema.number().default(9000),
 })
 
 // URL 抓取全文缓存领域声明：与官方 workspaceDomainSpec 同构——zod schema 即
@@ -30,6 +31,22 @@ const deepreadCacheDomainSpec = defineDomain({
   tables: { articles: domainTable(z.string(), urlCacheRecord) },
 })
 
+// 运行时自校准领域：滚动平均（指数加权）的实测速率/延迟，跨进程持久。
+// 数值 schema 用 z.number()；宿主若只有精简 zod shim（如测试）则降级为 z.string() 占位（schema 仅用于后端校验，不参与测试断言）。
+const statsNumSchema = typeof z.number === 'function' ? z.number() : z.string()
+const statsRecord = z.object({
+  rateTokPerSec: statsNumSchema,
+  latencyMs: statsNumSchema,
+  calls: statsNumSchema,
+  updatedAt: z.string(), // ISO-8601
+})
+
+const deepreadStatsDomainSpec = defineDomain({
+  name: 'deepread_stats',
+  version: 1,
+  tables: { stats: domainTable(z.string(), statsRecord) },
+})
+
 export const name = 'deepread'
 export const inject = ['fs', 'llm', 'tools', 'web', 'agentDefaultModel', 'sandboxPolicy']
 
@@ -44,12 +61,97 @@ export function apply(ctx, config) {
     cacheTtlHours: typeof cfg.cacheTtlHours === 'number' && Number.isFinite(cfg.cacheTtlHours) && cfg.cacheTtlHours >= 0 ? cfg.cacheTtlHours : 168,
     estTokensPerSecond: num(cfg.estTokensPerSecond, 30),
     estLatencyPerCallMs: num(cfg.estLatencyPerCallMs, 800),
+    backgroundMinChars: num(cfg.backgroundMinChars, 9000),
   }
   const CACHE_TTL_MS = tune.cacheTtlHours * 3600 * 1000
   const CACHE_MAX_ENTRIES = 200
   const CHUNK_CHARS = tune.chunkChars
   const MAX_PARTS = tune.maxParts
   const web = ctx.get('web')
+
+  // ---- 运行时自校准：实测 tok/s 与首字延迟的指数加权滚动平均（apply 闭包内共享）。
+  // 跨批次（batchFlow）同样通过 callModelJson 累计。首样本直接采用；之后 new = old*0.8 + sample*0.2。
+  const calibration = { rateTokPerSec: null, latencyMs: null, calls: 0, updatedAt: null, loaded: false }
+  // 每次 callModelJson 累计调用次数与总耗时，供 computeResult 计算 meta.stages（按差值归属到单次运行）。
+  const llmCallStats = { calls: 0, ms: 0 }
+
+  function clamp(v, lo, hi) {
+    return v < lo ? lo : (v > hi ? hi : v)
+  }
+
+  function calibratedRate() {
+    return typeof calibration.rateTokPerSec === 'number' && Number.isFinite(calibration.rateTokPerSec) && calibration.rateTokPerSec > 0 ? calibration.rateTokPerSec : null
+  }
+
+  function calibratedLatency() {
+    return typeof calibration.latencyMs === 'number' && Number.isFinite(calibration.latencyMs) && calibration.latencyMs > 0 ? calibration.latencyMs : null
+  }
+
+  function effectiveRate() {
+    const r = calibratedRate()
+    return r !== null ? r : tune.estTokensPerSecond
+  }
+
+  function effectiveLatency() {
+    const l = calibratedLatency()
+    return l !== null ? l : tune.estLatencyPerCallMs
+  }
+
+  let statsTablePromise = null
+  function getStatsTable() {
+    if (statsTablePromise === null) {
+      statsTablePromise = (async () => {
+        const storageDomain = ctx.get('storageDomain')
+        if (storageDomain === undefined || typeof storageDomain.open !== 'function') return null
+        try {
+          const domain = await storageDomain.open(deepreadStatsDomainSpec)
+          return domain.table('stats')
+        } catch (err) {
+          return null // 存储后端不可用：仅保留进程内校准
+        }
+      })()
+    }
+    return statsTablePromise
+  }
+
+  async function loadCalibration() {
+    if (calibration.loaded) return
+    calibration.loaded = true
+    const table = await getStatsTable()
+    if (table === null) return
+    try {
+      const rec = table.get('default')
+      if (rec !== undefined && rec !== null && typeof rec.rateTokPerSec === 'number' && rec.rateTokPerSec > 0) {
+        calibration.rateTokPerSec = rec.rateTokPerSec
+        calibration.latencyMs = typeof rec.latencyMs === 'number' && rec.latencyMs > 0 ? rec.latencyMs : null
+        calibration.calls = typeof rec.calls === 'number' ? rec.calls : 0
+        calibration.updatedAt = typeof rec.updatedAt === 'string' ? rec.updatedAt : null
+      }
+    } catch (err) { /* 读取失败：忽略 */ }
+  }
+
+  async function persistCalibration() {
+    const table = await getStatsTable()
+    if (table === null) return
+    try {
+      await table.put('default', {
+        rateTokPerSec: calibration.rateTokPerSec,
+        latencyMs: calibration.latencyMs === null ? 800 : calibration.latencyMs,
+        calls: calibration.calls,
+        updatedAt: calibration.updatedAt === null ? new Date().toISOString() : calibration.updatedAt,
+      })
+    } catch (err) { /* 写回失败：仅保留内存校准 */ }
+  }
+
+  function recordCalibration(rateTokPerSec, latencyMs) {
+    if (!Number.isFinite(rateTokPerSec) || rateTokPerSec <= 0) return
+    const lat = Number.isFinite(latencyMs) && latencyMs > 0 ? clamp(latencyMs, 50, 5000) : 800
+    calibration.calls++
+    calibration.rateTokPerSec = calibration.rateTokPerSec === null ? rateTokPerSec : calibration.rateTokPerSec * 0.8 + rateTokPerSec * 0.2
+    calibration.latencyMs = calibration.latencyMs === null ? lat : calibration.latencyMs * 0.8 + lat * 0.2
+    calibration.updatedAt = new Date().toISOString()
+    void persistCalibration()
+  }
 
   // ---- URL 缓存：优先 storageDomain（官方领域 KV，跨进程持久），
   // 服务缺失（如 headless profile 未挂 storage 组合包）时降级为进程内 Map。
@@ -233,7 +335,7 @@ export function apply(ctx, config) {
     return { provider: first.id, model: models[0].id }
   }
 
-  async function callModel(cfg, system, userText, maxTokens) {
+  async function callModel(cfg, system, userText, maxTokens, signal) {
     const options = {
       provider: cfg.provider,
       model: cfg.model,
@@ -246,6 +348,7 @@ export function apply(ctx, config) {
     let text = ''
     let failure = null
     for await (const chunk of ctx.llm.stream(options)) {
+      if (signal !== undefined && signal !== null && signal.aborted) throw new Error('任务已取消')
       if (chunk === null || chunk === undefined) continue
       if (chunk.type === 'text-delta' && typeof chunk.text === 'string') {
         text += chunk.text
@@ -273,22 +376,38 @@ export function apply(ctx, config) {
   // 带重试的 JSON 调用：按失败类型分类重试。底层错误（上游失败、空结果）与
   // 截断输出会逐步加大输出预算（×1.5，硬顶 16000），纯格式问题用校正提示
   // 同预算重试；最终失败时保留每个 attempt 的真实原因，不做无信息的吞没。
-  async function callModelJson(cfg, system, userText, maxTokens) {
+  async function callModelJson(cfg, system, userText, maxTokens, signal) {
     const MAX_BUDGET = 16000
     let prompt = userText
     let budget = maxTokens
     const history = []
+    const callStarted = Date.now()
     for (let attempt = 0; attempt < 3; attempt++) {
       let text = ''
       let error = null
+      const t0 = Date.now()
       try {
-        text = await callModel(cfg, system, prompt, budget)
+        text = await callModel(cfg, system, prompt, budget, signal)
+        // 运行时自校准：实测吞吐与首字延迟（估计），仅对成功调用采样。
+        const elapsedMs = Math.max(1, Date.now() - t0)
+        const tokens = estimateTokens(text)
+        const seconds = elapsedMs / 1000
+        if (text.trim() !== '' && tokens > 0) {
+          const rateTokPerSec = tokens / seconds
+          // latency ≈ 耗时 - 生成耗时（产出 token ÷ 速率），夹在 50..5000ms
+          const generationMs = rateTokPerSec > 0 ? (tokens / rateTokPerSec) * 1000 : elapsedMs
+          recordCalibration(rateTokPerSec, elapsedMs - generationMs)
+        }
       } catch (err) {
         error = err !== null && typeof err === 'object' && typeof err.message === 'string' ? err.message : String(err)
       }
       const parsed = error === null ? parseJson(text) : null
       history.push({ text, error })
-      if (parsed !== null) return parsed
+      if (parsed !== null) {
+        llmCallStats.calls++
+        llmCallStats.ms += Date.now() - callStarted
+        return parsed
+      }
       const truncated = error === null && looksTruncated(text)
       if (error !== null || truncated) {
         budget = Math.min(Math.ceil(budget * 1.5), MAX_BUDGET)
@@ -301,6 +420,8 @@ export function apply(ctx, config) {
         prompt = userText + '\n\n[系统校正] 你上一次的输出无法解析为 JSON（可能混入了解释文字、Markdown 围栏、尾随逗号，或字符串内直接换行）。请重新只输出一个合法的 JSON 对象：不要任何解释或额外文字，字符串内不要直接换行（多行文本用 \\n 转义），引号正确转义，末尾不要有逗号。'
       }
     }
+    llmCallStats.calls++
+    llmCallStats.ms += Date.now() - callStarted
     const kinds = history.map((h) => {
       if (h.error !== null) return '底层错误（' + h.error + '）'
       if (looksTruncated(h.text)) return '输出被截断'
@@ -668,8 +789,8 @@ export function apply(ctx, config) {
     return { map, twoByte }
   }
 
-  function extractPdfText(latin1) {
-    if (latin1.slice(0, 5) !== '%PDF-') throw new Error('不是有效的 PDF 文件')
+  // 解析 PDF 结构（xref/ObjStm/页树），返回页对象编号与后续单页提取所需的对象解析闭包。
+  function collectPageNums(latin1) {
     const objects = {}
     const objRe = /(\d+)\s+(\d+)\s+obj([\s\S]*?)endobj/g
     let m
@@ -971,6 +1092,11 @@ export function apply(ctx, config) {
       }
     }
 
+    return { pageNums, getObject, resolveRef, resolveMultiRef }
+  }
+
+  // 对给定页对象编号逐页提取纯文本（共享：extractPdfText 与 extractPdfStats 复用）。
+  function extractPageTexts(pageNums, getObject, resolveRef, resolveMultiRef) {
     const fontMaps = {}
     function getFontMap(fontRef) {
       if (!fontRef) return null
@@ -1062,8 +1188,27 @@ export function apply(ctx, config) {
       }
       pageTexts.push(pageText.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim())
     }
+    return pageTexts
+  }
+
+  function extractPdfText(latin1) {
+    if (latin1.slice(0, 5) !== '%PDF-') throw new Error('不是有效的 PDF 文件')
+    const state = collectPageNums(latin1)
+    const pageTexts = extractPageTexts(state.pageNums, state.getObject, state.resolveRef, state.resolveMultiRef)
     const pages = pageTexts.filter((t) => t.trim() !== '')
     return pages.map((t, i) => '【第' + (i + 1) + '页】\n' + t).join('\n\n')
+  }
+
+  // 采样快速预检：只解析结构与前 2 页文本，避免大 PDF 全量提取。
+  function extractPdfStats(latin1) {
+    if (latin1.slice(0, 5) !== '%PDF-') throw new Error('不是有效的 PDF 文件')
+    const state = collectPageNums(latin1)
+    const pages = state.pageNums.length
+    const sample = state.pageNums.slice(0, 2)
+    const pageTexts = extractPageTexts(sample, state.getObject, state.resolveRef, state.resolveMultiRef)
+    const sampleChars = pageTexts.reduce((n, t) => n + t.length, 0)
+    const sampleTokens = estimateTokens(pageTexts.join('\n'))
+    return { pages, samplePages: 2, sampleChars, sampleTokens }
   }
 
   // ---------- HTML → 文本 ----------
@@ -1206,7 +1351,8 @@ export function apply(ctx, config) {
     return contentText
   }
 
-  async function resolveSource(args) {
+  async function resolveSource(args, opts) {
+    const opt = opts !== null && typeof opts === 'object' ? opts : {}
     const url = typeof args.url === 'string' ? args.url.trim() : ''
     const path = typeof args.path === 'string' ? args.path.trim() : ''
     const text = typeof args.text === 'string' ? args.text : ''
@@ -1248,6 +1394,16 @@ export function apply(ctx, config) {
         const target = await ctx.fs.resolve(path)
         const bytes = await ctx.fs.readBytes(target, undefined, 30 * 1024 * 1024)
         const latin = bytesToLatin1(bytes)
+        const t0 = Date.now()
+        if (opt.statsOnly === true) {
+          let pdfStats = null
+          try {
+            pdfStats = extractPdfStats(latin)
+          } catch (error) {
+            throw new Error('PDF 解析失败：' + (error !== null && typeof error === 'object' && error.message ? error.message : String(error)))
+          }
+          return { text: '', source: path, sourceKind: 'pdf', pdfStats, extractMs: Date.now() - t0 }
+        }
         let extracted = ''
         try {
           extracted = extractPdfText(latin)
@@ -1255,7 +1411,7 @@ export function apply(ctx, config) {
           throw new Error('PDF 解析失败：' + (error !== null && typeof error === 'object' && error.message ? error.message : String(error)))
         }
         if (extracted.trim() === '') throw new Error('PDF 中没有可提取的文本（可能是扫描版/图片型 PDF，建议先 OCR 或转成 txt 再精读）')
-        return { text: extracted, source: path, sourceKind: 'pdf' }
+        return { text: extracted, source: path, sourceKind: 'pdf', extractMs: Date.now() - t0 }
       }
       if (/\.(txt|md|markdown|text|html|htm|csv|json|log)$/i.test(lower)) {
         const target = await ctx.fs.resolve(path)
@@ -1267,6 +1423,19 @@ export function apply(ctx, config) {
     }
     if (text.trim() === '') throw new Error('没有可分析的内容：请提供 url（微信公众号链接）、path（文件路径）或 text（粘贴文本）')
     return { text, source: '粘贴文本', sourceKind: 'text' }
+  }
+
+  // estimate 模式的轻量预解析：大 PDF（原始字节 > 2MB）走采样，其余全量；避免重复全量解析。
+  async function resolveForEstimate(args) {
+    const path = typeof args.path === 'string' ? args.path.trim() : ''
+    if (path !== '' && path.toLowerCase().endsWith('.pdf')) {
+      const target = await ctx.fs.resolve(path)
+      const bytes = await ctx.fs.readBytes(target, undefined, 30 * 1024 * 1024)
+      if (bytes.length > 2 * 1024 * 1024) {
+        return resolveSource(args, { statsOnly: true })
+      }
+    }
+    return resolveSource(args)
   }
 
   // ---------- 清洗 / 提示词 ----------
@@ -1582,41 +1751,54 @@ export function apply(ctx, config) {
   }
 
   function estimateCall(calls, inputTokens, outputTokens) {
-    const minutes = (inputTokens + outputTokens) / tune.estTokensPerSecond / 60 + (calls * tune.estLatencyPerCallMs) / 60000
+    const rate = effectiveRate()
+    const latency = effectiveLatency()
+    const minutes = (inputTokens + outputTokens) / rate / 60 + (calls * latency) / 60000
     return {
       calls,
       inputTokens,
       outputTokens,
       totalTokens: inputTokens + outputTokens,
       minutes: Math.round(minutes * 10) / 10,
-      minutesFormula: '（(' + inputTokens + '+' + outputTokens + ') ÷ ' + tune.estTokensPerSecond + ' tok/s + ' + calls + ' 次 × ' + tune.estLatencyPerCallMs + 'ms）',
+      minutesFormula: '（(' + inputTokens + '+' + outputTokens + ') ÷ ' + Math.round(rate * 10) / 10 + ' tok/s + ' + calls + ' 次 × ' + Math.round(latency) + 'ms）',
+      estTokensPerSecond: Math.round(rate * 10) / 10,
+      estLatencyPerCallMs: Math.round(latency),
+      calibrated: calibratedRate() !== null,
     }
   }
 
-  function buildEstimate(text, depth) {
-    const chars = text.length
-    const effective = text.length > tune.maxInputChars ? text.slice(0, tune.maxInputChars) : text
-    const parts = Math.min(Math.ceil(effective.length / CHUNK_CHARS), MAX_PARTS)
-    const perInput = estimateTokens(effective.length > CHUNK_CHARS ? effective.slice(0, CHUNK_CHARS) : effective) + EST_PROMPT_OVERHEAD
+  function buildEstimate(text, depth, ext) {
+    const extrapolated = ext !== null && typeof ext === 'object' && typeof ext.chars === 'number' ? ext : null
+    const chars = extrapolated !== null ? Math.max(1, Math.round(extrapolated.chars)) : text.length
+    const tokenRatio = extrapolated !== null && typeof extrapolated.tokensPerChar === 'number' && extrapolated.tokensPerChar > 0 ? extrapolated.tokensPerChar : null
+    const tokOf = (len) => {
+      if (tokenRatio !== null) return Math.ceil(len * tokenRatio)
+      return estimateTokens(text.slice(0, len))
+    }
+    const effectiveLen = chars > tune.maxInputChars ? tune.maxInputChars : chars
+    const parts = Math.min(Math.ceil(effectiveLen / CHUNK_CHARS), MAX_PARTS)
+    const perInput = tokOf(effectiveLen > CHUNK_CHARS ? CHUNK_CHARS : effectiveLen) + EST_PROMPT_OVERHEAD
     const summaryInput = parts * 400 + EST_PROMPT_OVERHEAD
     const modes = []
-    modes.push({ mode: 'quick', note: '单次调用，输入截断至 30000 字', ...estimateCall(1, estimateTokens(effective.slice(0, 30000)) + EST_PROMPT_OVERHEAD, 2500) })
-    if (effective.length <= 9000) {
-      modes.push({ mode: 'deep', note: '短文单次调用', ...estimateCall(1, estimateTokens(effective) + EST_PROMPT_OVERHEAD, 4000) })
+    modes.push({ mode: 'quick', note: '单次调用，输入截断至 30000 字', ...estimateCall(1, tokOf(Math.min(effectiveLen, 30000)) + EST_PROMPT_OVERHEAD, 2500) })
+    if (effectiveLen <= 9000) {
+      modes.push({ mode: 'deep', note: '短文单次调用', ...estimateCall(1, tokOf(effectiveLen) + EST_PROMPT_OVERHEAD, 4000) })
     } else {
       modes.push({ mode: 'deep', note: '分 ' + parts + ' 段逐段精读 + 1 次综合', ...estimateCall(parts + 1, parts * perInput + summaryInput, parts * 5000 + 5000) })
     }
     const bookParts = Math.max(1, parts)
     modes.push({ mode: 'book', note: '全书分 ' + bookParts + ' 部分精读并汇总', ...estimateCall(bookParts + 1, bookParts * perInput + summaryInput, bookParts * 5000 + 5000) })
-    if (effective.length <= 9000) {
-      modes.push({ mode: 'map', note: '短文单次知识地图', ...estimateCall(1, estimateTokens(effective) + EST_PROMPT_OVERHEAD, 5000) })
+    if (effectiveLen <= 9000) {
+      modes.push({ mode: 'map', note: '短文单次知识地图', ...estimateCall(1, tokOf(effectiveLen) + EST_PROMPT_OVERHEAD, 5000) })
     } else {
       modes.push({ mode: 'map', note: '分 ' + parts + ' 段提取 + 1 次汇总', ...estimateCall(parts + 1, parts * perInput + summaryInput, parts * 5000 + 5000) })
     }
-    const feynmanStruct = effective.length > 9000 ? 1 : 0
-    const structInput = feynmanStruct > 0 ? estimateTokens(effective.slice(0, 5000)) + EST_PROMPT_OVERHEAD : 0
+    const feynmanStruct = effectiveLen > 9000 ? 1 : 0
+    const structInput = feynmanStruct > 0 ? tokOf(5000) + EST_PROMPT_OVERHEAD : 0
     modes.push({ mode: 'feynman', note: (feynmanStruct > 0 ? '目录提问 1 次 + ' : '') + '分 ' + Math.max(1, parts) + ' 章 + 合并导图与复习计划 1 次', ...estimateCall(Math.max(1, parts) + feynmanStruct + 1, Math.max(1, parts) * perInput + structInput + summaryInput, Math.max(1, parts) * 5000 + 5000) })
-    return { chars, modes, estTokensPerSecond: tune.estTokensPerSecond, estLatencyPerCallMs: tune.estLatencyPerCallMs }
+    const result = { chars, modes, estTokensPerSecond: Math.round(effectiveRate() * 10) / 10, estLatencyPerCallMs: Math.round(effectiveLatency()), calibrated: calibratedRate() !== null }
+    if (extrapolated !== null) { result.sampled = true; result.note = '按采样外推' }
+    return result
   }
 
   // ---------- 批量精读与跨篇对比 ----------
@@ -1655,6 +1837,7 @@ export function apply(ctx, config) {
   }
 
   async function batchEstimateFlow(args, language) {
+    await loadCalibration()
     const items = Array.isArray(args.batch) ? args.batch.slice(0, 10) : []
     const rows = []
     let totalChars = 0
@@ -1674,20 +1857,21 @@ export function apply(ctx, config) {
     const finalCall = estimateCall(1, items.length * 400 + EST_PROMPT_OVERHEAD, 5000)
     totalCalls += 1
     totalTokens += finalCall.totalTokens
-    const totalMinutes = (totalTokens / tune.estTokensPerSecond / 60) + (totalCalls * tune.estLatencyPerCallMs) / 60000
+    const totalMinutes = (totalTokens / effectiveRate() / 60) + (totalCalls * effectiveLatency()) / 60000
     return {
       kind: 'estimate', title: '批量预算预检', summary: items.length + ' 篇文档：逐篇快速提取 + 1 次跨篇对比。', thesis: '',
       arguments: [], quotes: [], concepts: [], questions: [], structure: [], chapters: [],
       estimate: {
         batch: true, items: rows, finalCall,
         totalCalls, totalTokens, totalMinutes: Math.round(totalMinutes * 10) / 10,
-        estTokensPerSecond: tune.estTokensPerSecond, estLatencyPerCallMs: tune.estLatencyPerCallMs,
+        estTokensPerSecond: Math.round(effectiveRate() * 10) / 10, estLatencyPerCallMs: Math.round(effectiveLatency()),
+        calibrated: calibratedRate() !== null,
       },
       meta: { source: items.length + ' 篇文档', sourceKind: 'batch', chars: totalChars, depth: 'batch', durationMs: 0 },
     }
   }
 
-  async function batchFlow(args, language) {
+  async function batchFlow(args, language, signal) {
     const started = Date.now()
     const items = Array.isArray(args.batch) ? args.batch.slice(0, 10) : []
     const docs = []
@@ -1700,7 +1884,7 @@ export function apply(ctx, config) {
       if (text.length > 30000) text = text.slice(0, 30000)
       totalChars += text.length
       const title = str(item.title, '')
-      const parsed = await callModelJson(cfg, sectionSystem('quick', language, str(item.focus, '')), (title !== '' ? '【文档标题：' + title + '】\n' : '') + sectionUser(text, i, items.length), 2500)
+      const parsed = await callModelJson(cfg, sectionSystem('quick', language, str(item.focus, '')), (title !== '' ? '【文档标题：' + title + '】\n' : '') + sectionUser(text, i, items.length), 2500, signal)
       const s = sanitizeSection(parsed === null ? {} : parsed, title !== '' ? title : ('第 ' + (i + 1) + ' 篇'))
       docs.push({
         index: i + 1, title: s.title, summary: s.summary, thesis: s.thesis,
@@ -1709,7 +1893,7 @@ export function apply(ctx, config) {
       })
     }
     const compact = docs.map((d) => ({ title: d.title, summary: d.summary, thesis: d.thesis, arguments: d.arguments.slice(0, 3), quotes: d.quotes.slice(0, 3) }))
-    const finalParsed = await callModelJson(cfg, batchFinalSystem(language), '以下 JSON 数组是 ' + docs.length + ' 篇文章各自的要点：\n\n' + JSON.stringify(compact), 5000)
+    const finalParsed = await callModelJson(cfg, batchFinalSystem(language), '以下 JSON 数组是 ' + docs.length + ' 篇文章各自的要点：\n\n' + JSON.stringify(compact), 5000, signal)
     const fp = finalParsed !== null && typeof finalParsed === 'object' ? finalParsed : {}
     return {
       kind: 'batch',
@@ -1728,15 +1912,38 @@ export function apply(ctx, config) {
     }
   }
 
-  async function computeResult(input) {
+  function normalizeDepth(d) {
+    return d === 'quick' ? 'quick' : (d === 'book' ? 'book' : (d === 'map' ? 'map' : (d === 'feynman' ? 'feynman' : 'deep')))
+  }
+
+  async function computeResult(input, opts) {
+    const opt = opts !== null && typeof opts === 'object' ? opts : {}
     const args = input !== null && typeof input === 'object' ? input : {}
     const started = Date.now()
-    const depth = args.depth === 'quick' ? 'quick' : (args.depth === 'book' ? 'book' : (args.depth === 'map' ? 'map' : (args.depth === 'feynman' ? 'feynman' : 'deep')))
+    const depth = normalizeDepth(args.depth)
     const language = args.language === 'en' ? 'en' : (args.language === 'zh' ? 'zh' : 'auto')
     const focus = typeof args.focus === 'string' ? args.focus : ''
+    const onProgress = typeof opt.onProgress === 'function' ? opt.onProgress : null
+    const signal = opt.signal !== undefined && opt.signal !== null ? opt.signal : null
+    const llmStart = { calls: llmCallStats.calls, ms: llmCallStats.ms }
 
-    const src = await resolveSource(args)
-    let text = String(src.text).replace(/\r\n/g, '\n')
+    let src
+    let text
+    let resolveMs = 0
+    if (opt.preResolved !== undefined && opt.preResolved !== null) {
+      src = opt.preResolved.src
+      text = opt.preResolved.text
+      resolveMs = typeof opt.preResolved.resolveMs === 'number' ? opt.preResolved.resolveMs : 0
+    } else {
+      const t0 = Date.now()
+      src = args.estimate === true ? await resolveForEstimate(args) : await resolveSource(args)
+      resolveMs = Date.now() - t0
+      text = String(src.text).replace(/\r\n/g, '\n')
+    }
+    // 先解析来源再加载校准：若 storage 后端单文件复用了 URL 缓存域，加载会因域名校验失败而自动降级为仅内存，
+    // 避免把校准记录写进 URL 缓存文件造成覆盖。
+    await loadCalibration()
+    const extractMs = typeof src.extractMs === 'number' ? src.extractMs : 0
     const source = src.source
     const sourceKind = src.sourceKind
     const cacheFields = {
@@ -1744,52 +1951,78 @@ export function apply(ctx, config) {
       ...(typeof src.fetchedAt === 'string' ? { fetchedAt: src.fetchedAt } : {}),
       ...(typeof src.note === 'string' && src.note !== '' ? { note: src.note } : {}),
     }
-    if (text.trim() === '') throw new Error('没有可分析的内容')
-    if (text.length > tune.maxInputChars) text = text.slice(0, tune.maxInputChars)
-    const estimate = buildEstimate(text, depth)
+    const buildStages = () => ({
+      resolveMs: Math.round(resolveMs),
+      extractMs: Math.round(extractMs),
+      llmMs: Math.round(llmCallStats.ms - llmStart.ms),
+      calls: llmCallStats.calls - llmStart.calls,
+    })
 
     if (args.estimate === true) {
+      let estimate
+      let chars
+      const pdfStats = src.pdfStats !== undefined && src.pdfStats !== null ? src.pdfStats : null
+      if (pdfStats !== null) {
+        const sampleChars = typeof pdfStats.sampleChars === 'number' ? pdfStats.sampleChars : 0
+        const samplePages = typeof pdfStats.samplePages === 'number' && pdfStats.samplePages > 0 ? pdfStats.samplePages : 2
+        const pages = typeof pdfStats.pages === 'number' ? pdfStats.pages : 1
+        const fullChars = Math.max(1, Math.round((sampleChars / samplePages) * pages))
+        const sampleTokens = typeof pdfStats.sampleTokens === 'number' ? pdfStats.sampleTokens : 0
+        const tokensPerChar = sampleChars > 0 && sampleTokens > 0 ? sampleTokens / sampleChars : 0.6
+        estimate = buildEstimate('', depth, { chars: fullChars, tokensPerChar })
+        chars = fullChars
+      } else {
+        estimate = buildEstimate(text, depth)
+        chars = text.length
+      }
       return {
         kind: 'estimate', title: '预算预检', summary: '不调用模型，仅按字数与模式估算 token 与耗时。', thesis: '',
         arguments: [], quotes: [], concepts: [], questions: [], structure: [], chapters: [],
         estimate,
-        meta: { ...cacheFields, source, sourceKind, chars: text.length, depth, estimate, durationMs: Date.now() - started },
+        meta: { ...cacheFields, source, sourceKind, chars, depth, estimate, durationMs: Date.now() - started, stages: buildStages(), ...(pdfStats !== null ? { pdfStats } : {}) },
       }
     }
+
+    if (text.trim() === '') throw new Error('没有可分析的内容')
+    if (text.length > tune.maxInputChars) text = text.slice(0, tune.maxInputChars)
+    const estimate = buildEstimate(text, depth)
 
     const cfg = await pickConfig()
 
     if (depth === 'quick') {
       const limited = text.length > 30000 ? text.slice(0, 30000) : text
-      const parsed = await callModelJson(cfg, sectionSystem('quick', language, focus), sectionUser(limited, 0, 1), 2500)
+      const parsed = await callModelJson(cfg, sectionSystem('quick', language, focus), sectionUser(limited, 0, 1), 2500, signal)
       if (parsed === null) throw new Error('模型输出无法解析为 JSON，请重试')
       const s = sanitizeSection(parsed, '未命名内容')
       return {
         kind: 'article', title: s.title, summary: s.summary, thesis: s.thesis,
         arguments: s.arguments, quotes: s.quotes, concepts: s.concepts, questions: s.questions,
         structure: [], chapters: [], citations: [],
-        meta: { ...cacheFields, source, sourceKind, chars: limited.length, chunks: 1, depth: 'quick', estimate, durationMs: Date.now() - started },
+        meta: { ...cacheFields, source, sourceKind, chars: limited.length, chunks: 1, depth: 'quick', estimate, durationMs: Date.now() - started, stages: buildStages() },
       }
     }
 
     if (depth === 'map') {
       if (text.length <= 9000) {
-        const parsed = await callModelJson(cfg, mapSystem(language, focus, false), mapUser(text), 5000)
+        const parsed = await callModelJson(cfg, mapSystem(language, focus, false), mapUser(text), 5000, signal)
         if (parsed === null) throw new Error('模型输出无法解析为 JSON，请重试')
-        return sanitizeMap(parsed, [], { ...cacheFields, source, sourceKind, chars: text.length, chunks: 1, depth: 'map', estimate, durationMs: Date.now() - started })
+        return sanitizeMap(parsed, [], { ...cacheFields, source, sourceKind, chars: text.length, chunks: 1, depth: 'map', estimate, durationMs: Date.now() - started, stages: buildStages() })
       }
       const chapters = []
       let parts = splitChunks(text, CHUNK_CHARS)
       if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS)
       for (let i = 0; i < parts.length; i++) {
-        const parsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 5000)
+        if (onProgress !== null) onProgress('精读第 ' + (i + 1) + '/' + parts.length + ' 段…')
+        const parsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 5000, signal)
         const s = sanitizeSection(parsed === null ? {} : parsed, '第 ' + (i + 1) + ' 部分')
         chapters.push({ title: s.title, summary: s.summary, thesis: s.thesis, arguments: s.arguments, quotes: s.quotes })
+        if (onProgress !== null) onProgress('完成第 ' + (i + 1) + '/' + parts.length + ' 段')
       }
       const condensed = chapters.map((c) => ({ title: c.title, summary: c.summary, thesis: c.thesis, arguments: c.arguments.slice(0, 3) }))
-      const finalParsed = await callModelJson(cfg, mapSystem(language, focus, true), mapFinalUser(condensed, text.length), 5000)
+      if (onProgress !== null) onProgress('汇总中…')
+      const finalParsed = await callModelJson(cfg, mapSystem(language, focus, true), mapFinalUser(condensed, text.length), 5000, signal)
       if (finalParsed === null) throw new Error('模型输出无法解析为 JSON，请重试')
-      return sanitizeMap(finalParsed, chapters, { ...cacheFields, source, sourceKind, chars: text.length, chunks: chapters.length, depth: 'map', estimate, durationMs: Date.now() - started })
+      return sanitizeMap(finalParsed, chapters, { ...cacheFields, source, sourceKind, chars: text.length, chunks: chapters.length, depth: 'map', estimate, durationMs: Date.now() - started, stages: buildStages() })
     }
 
     if (depth === 'feynman') {
@@ -1797,7 +2030,7 @@ export function apply(ctx, config) {
       let toc = []
       let questions = []
       if (isBook) {
-        const structParsed = await callModelJson(cfg, feynmanStructSystem(language), '请浏览目录并提出阅读问题：\n\n' + text.slice(0, 5000), 2500)
+        const structParsed = await callModelJson(cfg, feynmanStructSystem(language), '请浏览目录并提出阅读问题：\n\n' + text.slice(0, 5000), 2500, signal)
         if (structParsed !== null) {
           toc = arr(structParsed.toc).slice(0, 30).map((x) => String(x).trim()).filter((x) => x !== '')
           questions = arr(structParsed.questions).slice(0, 6).map((x) => String(x).trim()).filter((x) => x !== '')
@@ -1807,11 +2040,14 @@ export function apply(ctx, config) {
       if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS)
       const feynmanChapters = []
       for (let i = 0; i < parts.length; i++) {
-        const parsed = await callModelJson(cfg, feynmanChapterSystem(language, focus), feynmanChapterUser(parts[i], i + 1, parts.length), 5000)
+        if (onProgress !== null) onProgress('精读第 ' + (i + 1) + '/' + parts.length + ' 段…')
+        const parsed = await callModelJson(cfg, feynmanChapterSystem(language, focus), feynmanChapterUser(parts[i], i + 1, parts.length), 5000, signal)
         feynmanChapters.push(sanitizeFeynmanChapter(parsed, i + 1))
+        if (onProgress !== null) onProgress('完成第 ' + (i + 1) + '/' + parts.length + ' 段')
       }
       const compact = feynmanChapters.map((c) => ({ title: c.title, points: c.points.slice(0, 3), explanation: c.explanation.slice(0, 300) }))
-      const finalParsed = await callModelJson(cfg, feynmanFinalSystem(language), feynmanFinalUser(compact), 5000)
+      if (onProgress !== null) onProgress('汇总中…')
+      const finalParsed = await callModelJson(cfg, feynmanFinalSystem(language), feynmanFinalUser(compact), 5000, signal)
       const fp = finalParsed !== null && typeof finalParsed === 'object' ? finalParsed : {}
       const reviewPlan = arr(fp.reviewPlan).slice(0, 5).map((r) => {
         const ro = r !== null && typeof r === 'object' ? r : { interval: String(r) }
@@ -1835,7 +2071,7 @@ export function apply(ctx, config) {
         concepts: [],
         structure: [],
         chapters: [],
-        meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: feynmanChapters.length, depth: 'feynman', estimate, durationMs: Date.now() - started },
+        meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: feynmanChapters.length, depth: 'feynman', estimate, durationMs: Date.now() - started, stages: buildStages() },
       }
     }
 
@@ -1845,18 +2081,21 @@ export function apply(ctx, config) {
       let parts = splitChunks(text, CHUNK_CHARS)
       if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS)
       for (let i = 0; i < parts.length; i++) {
-        const parsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 5000)
+        if (onProgress !== null) onProgress('精读第 ' + (i + 1) + '/' + parts.length + ' 段…')
+        const parsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 5000, signal)
         const s = sanitizeSection(parsed === null ? {} : parsed, '第 ' + (i + 1) + ' 部分')
         chapters.push({ title: s.title, summary: s.summary, thesis: s.thesis, arguments: s.arguments, quotes: s.quotes })
+        if (onProgress !== null) onProgress('完成第 ' + (i + 1) + '/' + parts.length + ' 段')
       }
     }
 
     let finalParsed = null
     if (chapters.length > 0) {
+      if (onProgress !== null) onProgress('汇总中…')
       const parts = chapters.map((c) => ({ title: c.title, summary: c.summary, thesis: c.thesis, arguments: c.arguments.slice(0, 3) }))
-      finalParsed = await callModelJson(cfg, finalSystem(language), finalUserFromParts(parts, text.length), 5000)
+      finalParsed = await callModelJson(cfg, finalSystem(language), finalUserFromParts(parts, text.length), 5000, signal)
     } else {
-      finalParsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(text, 0, 1), 4000)
+      finalParsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(text, 0, 1), 4000, signal)
     }
 
     if (finalParsed === null) {
@@ -1867,7 +2106,7 @@ export function apply(ctx, config) {
           title: first.title, summary: first.summary, thesis: first.thesis,
           arguments: first.arguments, quotes: first.quotes, concepts: [], questions: [],
           structure: [], chapters, citations: [],
-          meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: chapters.length, depth, estimate, durationMs: Date.now() - started, note: (typeof src.note === 'string' && src.note !== '' ? src.note + '；' : '') + '综合阶段输出解析失败，已回退为各部分要点' },
+          meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: chapters.length, depth, estimate, durationMs: Date.now() - started, stages: buildStages(), note: (typeof src.note === 'string' && src.note !== '' ? src.note + '；' : '') + '综合阶段输出解析失败，已回退为各部分要点' },
         }
       }
       throw new Error('模型输出无法解析为 JSON，请重试')
@@ -1881,7 +2120,7 @@ export function apply(ctx, config) {
       title: fin.title, summary: fin.summary, thesis: fin.thesis,
       arguments: fin.arguments, quotes: fin.quotes, concepts: fin.concepts, questions: fin.questions,
       structure, chapters, citations,
-      meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: chunked ? chapters.length : 1, depth, estimate, durationMs: Date.now() - started },
+      meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: chunked ? chapters.length : 1, depth, estimate, durationMs: Date.now() - started, stages: buildStages() },
     }
   }
 
@@ -1902,7 +2141,25 @@ export function apply(ctx, config) {
       const row = est.modes.find((mm) => mm !== null && typeof mm === 'object' && mm.mode === meta.depth) || null
       if (row !== null && typeof row.calls === 'number') estText = ' · 本次预算：约 ' + row.calls + ' 次调用 / ' + row.totalTokens + ' token / ≈' + row.minutes + ' 分钟'
     }
-    return '（来源：' + str(meta.source, '粘贴文本') + ' · 字数：' + (typeof meta.chars === 'number' ? meta.chars : 0) + ' · 深度：' + str(meta.depth, 'deep') + (cacheText !== '' ? ' · ' + cacheText : '') + estText + '）'
+    let execText = ''
+    const st = meta !== null && typeof meta === 'object' ? meta.stages : null
+    if (st !== null && typeof st === 'object') {
+      const bits = []
+      if (typeof meta.chunks === 'number' && meta.chunks > 0) bits.push('分段 ' + meta.chunks)
+      if (typeof st.resolveMs === 'number') bits.push('抓取 ' + fmtSec(st.resolveMs) + 's')
+      if (typeof st.extractMs === 'number' && st.extractMs > 0) bits.push('解析 ' + fmtSec(st.extractMs) + 's')
+      if (typeof st.calls === 'number') bits.push('模型 ' + st.calls + ' 次 ' + fmtSec(st.llmMs) + 's')
+      const total = (typeof st.resolveMs === 'number' ? st.resolveMs : 0) + (typeof st.extractMs === 'number' ? st.extractMs : 0) + (typeof st.llmMs === 'number' ? st.llmMs : 0)
+      if (total > 0) bits.push('总 ' + fmtSec(total) + 's')
+      if (bits.length > 0) execText = ' · ' + bits.join(' · ')
+    }
+    return '（来源：' + str(meta.source, '粘贴文本') + ' · 字数：' + (typeof meta.chars === 'number' ? meta.chars : 0) + ' · 深度：' + str(meta.depth, 'deep') + (cacheText !== '' ? ' · ' + cacheText : '') + estText + execText + '）'
+  }
+
+  function fmtSec(ms) {
+    if (typeof ms !== 'number' || !Number.isFinite(ms)) return '0'
+    const s = Math.round(ms / 100) / 10
+    return (Number.isInteger(s) ? String(s) : String(s))
   }
 
   function renderFeynmanMarkdown(v) {
@@ -2011,6 +2268,7 @@ export function apply(ctx, config) {
       })
       lines.push('- **跨篇对比**（1 次）· 约 ' + (est.finalCall !== null && typeof est.finalCall === 'object' && typeof est.finalCall.totalTokens === 'number' ? est.finalCall.totalTokens : 0) + ' token')
       lines.push('', '**合计**：' + (typeof est.totalCalls === 'number' ? est.totalCalls : 0) + ' 次调用 · 约 ' + (typeof est.totalTokens === 'number' ? est.totalTokens : 0) + ' token · 预计 ' + (typeof est.totalMinutes === 'number' ? est.totalMinutes : 0) + ' 分钟')
+      if (est.calibrated === true) lines.push('', '> 已使用运行时实测校准速率（' + tps + ' tok/s / ' + lat + 'ms）。')
     } else {
       lines.push('', '**口径**：中文≈0.6 token/字，拉丁≈0.25 token/字符；输出按各阶段预算计；时间=(总token÷' + tps + ' tok/s)+(调用次数×' + lat + 'ms)。', '', '| 模式 | 调用次数 | 输入 token | 输出 token | 总 token | 预计耗时 | 说明 |', '| --- | --- | --- | --- | --- | --- | --- |')
       const modes = arr(est.modes)
@@ -2019,6 +2277,8 @@ export function apply(ctx, config) {
         lines.push('| ' + str(mo.mode, '') + ' | ' + (typeof mo.calls === 'number' ? mo.calls : 0) + ' | ' + (typeof mo.inputTokens === 'number' ? mo.inputTokens : 0) + ' | ' + (typeof mo.outputTokens === 'number' ? mo.outputTokens : 0) + ' | ' + (typeof mo.totalTokens === 'number' ? mo.totalTokens : 0) + ' | ' + (typeof mo.minutes === 'number' ? '≈ ' + mo.minutes + ' 分钟' : '') + ' | ' + str(mo.note, '') + ' |')
       })
       if (typeof est.chars === 'number') lines.push('', '输入字数：' + est.chars + '（超过 ' + tune.maxInputChars + ' 会被截断）')
+      if (est.sampled === true) lines.push('', '> 本预检采用 PDF 采样外推（前 2 页字数 ÷ 2 × 总页数），仅作数量级参考。')
+      if (est.calibrated === true) lines.push('', '> 已使用运行时实测校准速率（' + tps + ' tok/s / ' + lat + 'ms）。')
       lines.push('', '> 估算基于本地字数启发式与默认速率/延迟，实际取决于模型速度、负载与网络。')
     }
     return lines.join('\n')
@@ -2073,6 +2333,7 @@ export function apply(ctx, config) {
   }
 
   function renderMarkdown(v) {
+    if (v.kind === 'background') return '已启动后台精读任务 ' + str(v.jobId, '') + '（' + str(v.label, '') + '）。\n用 job_output 读取进度与最终报告；job_kill 可取消。'
     if (v.kind === 'map') return renderMapMarkdown(v)
     if (v.kind === 'feynman') return renderFeynmanMarkdown(v)
     if (v.kind === 'estimate') return renderEstimateMarkdown(v)
@@ -2473,21 +2734,170 @@ export function apply(ctx, config) {
     }
   }
 
-  async function analyze(input) {
+  function sourceLabel(source) {
+    const s = str(source, '')
+    if (s === '' || s === '粘贴文本') return '粘贴内容'
+    return s.length > 24 ? s.slice(0, 24) + '…' : s
+  }
+
+  async function startBackground(args, input, preResolved, jobs, exec, exportFmt, language, isBatch) {
+    await loadCalibration()
+    const depth = normalizeDepth(args.depth)
+    let sourceLabelText = '粘贴内容'
+    let M = 1
+    let minutes = null
+    let chars = 0
+    let sourceKind = 'text'
+    let sourceText = '粘贴内容'
+
+    if (isBatch) {
+      const items = Array.isArray(args.batch) ? args.batch : []
+      M = Math.max(1, items.length)
+      sourceLabelText = items.length + ' 篇文档'
+      sourceText = items.length + ' 篇文档'
+      sourceKind = 'batch'
+    } else {
+      const text = preResolved.text
+      const src = preResolved.src
+      chars = text.length
+      sourceKind = typeof src.sourceKind === 'string' ? src.sourceKind : 'text'
+      sourceText = typeof src.source === 'string' ? src.source : '粘贴内容'
+      sourceLabelText = sourceLabel(sourceText)
+      const est = buildEstimate(text, depth)
+      const row = est.modes.find((mm) => mm !== null && typeof mm === 'object' && mm.mode === depth) || est.modes[0]
+      minutes = row !== null && typeof row.minutes === 'number' ? row.minutes : null
+      M = depth === 'quick' ? 1 : Math.max(1, Math.min(splitChunks(text, CHUNK_CHARS).length, MAX_PARTS))
+    }
+
+    const label = 'deepread 精读「' + sourceLabelText + '」· ' + M + ' 段' + (minutes !== null ? ' · 预算≈' + minutes + '分钟' : '')
+
+    const lines = []
+    let cancelled = false
+    let cancelReason = ''
+    const signal = { aborted: false }
+    let resolveDone = null
+    const donePromise = new Promise((resolve) => { resolveDone = resolve })
+    const pushLine = (line) => { if (typeof line === 'string' && line !== '') lines.push(line) }
+    const onProgress = pushLine
+    const readOutput = () => { const out = lines.join('\n'); lines.length = 0; return out }
+    const hooks = {
+      cancel(reason) {
+        cancelled = true
+        cancelReason = typeof reason === 'string' && reason !== '' ? reason : '已取消'
+        signal.aborted = true
+      },
+      done: donePromise,
+      readOutput,
+    }
+
+    const jobId = await jobs.start({
+      kind: 'deepread',
+      label,
+      outputLimitBytes: 65536,
+      owner: exec !== null && typeof exec === 'object' && exec.agent !== undefined ? exec.agent : undefined,
+      run: () => {
+        void (async () => {
+          try {
+            const result = isBatch
+              ? await batchFlow(args, language, signal)
+              : await computeResult(input, { preResolved, onProgress, signal })
+            await attachExports(result, exportFmt)
+            pushLine('【最终报告】\n' + renderMarkdown(result))
+            resolveDone({ status: 'completed' })
+          } catch (err) {
+            const msg = err !== null && typeof err === 'object' && typeof err.message === 'string' ? err.message : String(err)
+            if (cancelled) {
+              pushLine('已取消：' + cancelReason)
+              resolveDone({ status: 'killed', detail: cancelReason })
+            } else {
+              pushLine('后台精读失败：' + msg)
+              resolveDone({ status: 'failed', detail: msg })
+            }
+          }
+        })()
+        return hooks
+      },
+    })
+
+    return {
+      kind: 'background',
+      jobId,
+      label,
+      summary: '后台精读已启动',
+      thesis: '',
+      meta: { depth: isBatch ? 'batch' : depth, chars, chunks: M, source: sourceText, sourceKind },
+    }
+  }
+
+  async function analyze(input, exec) {
     const args = input !== null && typeof input === 'object' ? input : {}
     const exportFmt = args.export === 'md' || args.export === 'mm' || args.export === 'html' || args.export === 'all' ? args.export : 'none'
     const language = args.language === 'en' ? 'en' : (args.language === 'zh' ? 'zh' : 'auto')
     const isBatch = Array.isArray(args.batch) && args.batch.length >= 2
-    const result = isBatch
-      ? (args.estimate === true ? await batchEstimateFlow(args, language) : await batchFlow(args, language))
-      : await computeResult(input)
+    const depth = normalizeDepth(args.depth)
+
+    // 预算预检 → 前台（现状）
+    if (args.estimate === true) {
+      const result = isBatch
+        ? await batchEstimateFlow(args, language)
+        : await computeResult(input)
+      await attachExports(result, exportFmt)
+      return result
+    }
+
+    // 批量精读（非 estimate）→ 恒为长任务：有 jobs 转后台，否则前台 batchFlow
+    if (isBatch) {
+      const jobs = ctx.get('jobs')
+      if (jobs !== undefined && typeof jobs.start === 'function') {
+        try {
+          return await startBackground(args, input, null, jobs, exec, exportFmt, language, true)
+        } catch (err) { /* jobs.start 抛错 → 回退前台 */ }
+      }
+      const result = await batchFlow(args, language, null)
+      await attachExports(result, exportFmt)
+      return result
+    }
+
+    // quick 模式 → 前台（现状）
+    if (depth === 'quick') {
+      const result = await computeResult(input)
+      await attachExports(result, exportFmt)
+      return result
+    }
+
+    // 非 batch 预解析一次（全量）判长，避免 computeResult 重复解析
+    const t0 = Date.now()
+    const src = await resolveSource(args)
+    const resolveMs = Date.now() - t0
+    const text = String(src.text).replace(/\r\n/g, '\n')
+    const preResolved = { text, src, resolveMs }
+    const isLong = text.length > tune.backgroundMinChars
+
+    // 非长输入 → 前台（把预解析结果传入，避免重复 resolveSource）
+    if (!isLong) {
+      const result = await computeResult(input, { preResolved })
+      await attachExports(result, exportFmt)
+      return result
+    }
+
+    // 长任务：有官方 jobs 服务 → 后台；否则前台降级
+    const jobs = ctx.get('jobs')
+    if (jobs !== undefined && typeof jobs.start === 'function') {
+      try {
+        return await startBackground(args, input, preResolved, jobs, exec, exportFmt, language, false)
+      } catch (err) {
+        // jobs.start 抛错（如无 controller）→ 回退前台
+      }
+    }
+
+    const result = await computeResult(input, { preResolved })
     await attachExports(result, exportFmt)
     return result
   }
 
   const tool = defineTool({
     name: 'deepread',
-    description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。五种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；feynman=费曼读书法（浏览目录→提出问题→分章阅读→提取观点数据证据→章节导图→合上书讲解→自检知识缺口→回原文修正→合并全书导图→再讲一次→间隔复习计划）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）、batch（2-10 篇批量精读+跨篇对比）。报告含引用溯源（页码/段落定位）。estimate=true 可先做预算预检（预计 token 与耗时，不调用模型）。知乎/掘金等反爬站点请粘贴正文。同一链接抓取过的全文会写入本地缓存（默认 7 天），换模式重读同一篇文章不再重新联网抓取；refresh=true 可强制重新抓取。',
+    description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。五种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；feynman=费曼读书法（浏览目录→提出问题→分章阅读→提取观点数据证据→章节导图→合上书讲解→自检知识缺口→回原文修正→合并全书导图→再讲一次→间隔复习计划）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）、batch（2-10 篇批量精读+跨篇对比）。报告含引用溯源（页码/段落定位）。estimate=true 可先做预算预检（预计 token 与耗时，不调用模型；大 PDF 采用采样外推）。知乎/掘金等反爬站点请粘贴正文。同一链接抓取过的全文会写入本地缓存（默认 7 天），换模式重读同一篇文章不再重新联网抓取；refresh=true 可强制重新抓取。长文（超过 backgroundMinChars）或批量精读会自动转为后台任务：返回 kind=background 与 jobId，用 job_output 轮询进度（「第 i/M 段」）与最终报告，job_kill 可取消。',
     timeoutMs: tune.timeoutMs,
     parameters: {
       url: { type: 'string', description: '要精读的网页链接。仅支持微信公众号（mp.weixin.qq.com）的稳定链接；知乎/掘金等有反爬的站点不支持，请粘贴正文。与 path/text 至少提供一个。' },
@@ -2498,7 +2908,7 @@ export function apply(ctx, config) {
       refresh: { type: 'boolean', default: false, description: '强制重新抓取并刷新缓存（默认 false：同一链接命中缓存时直接复用已抓取的全文，不再联网）。' },
       focus: { type: 'string', description: '读者特别关注的角度，例如"论证逻辑""研究方法""与既有理论的关系"。' },
       language: { type: 'string', enum: ['zh', 'en', 'auto'], default: 'auto', description: '报告输出语言，默认 auto（跟随原文）。' },
-      estimate: { type: 'boolean', default: false, description: '预算预检：true 时不调用模型，只返回各模式的预计调用次数、输入/输出 token 与耗时（按字数估算：中文≈0.6 token/字，拉丁≈0.25 token/字符，输出按各阶段预算计；时间=(总token÷速率)+(调用次数×单次延迟)，速率与延迟可用 Config 调整）。' },
+      estimate: { type: 'boolean', default: false, description: '预算预检：true 时不调用模型，只返回各模式的预计调用次数、输入/输出 token 与耗时（按字数估算：中文≈0.6 token/字，拉丁≈0.25 token/字符，输出按各阶段预算计；时间=(总token÷速率)+(调用次数×单次延迟)，速率与延迟可用 Config 调整；大 PDF 采用采样外推）。' },
       batch: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { title: { type: 'string', description: '文档标题（可选，对比报告中用于标识）' }, url: { type: 'string' }, path: { type: 'string' }, text: { type: 'string' }, focus: { type: 'string' } } }, description: '批量精读 2-10 篇并输出跨篇对比报告（对比主题矩阵、冲突点、互补关系与综合结论）。每篇需提供 url/path/text 之一；与 url/path/text 互斥。' },
     },
     output: {
@@ -2510,6 +2920,8 @@ export function apply(ctx, config) {
           title: { type: 'string', required: true },
           summary: { type: 'string', required: true },
           thesis: { type: 'string', required: true },
+          jobId: { type: 'string' },
+          label: { type: 'string' },
           coreQuestion: { type: 'string' },
           coreConclusions: { type: 'array', items: { type: 'string' } },
           items: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { type: { type: 'string' }, claim: { type: 'string' }, evidence: { type: 'string' }, source: { type: 'string' }, confidence: { type: 'string' }, relations: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { to: { type: 'string' }, type: { type: 'string' } } } } } } },
@@ -2533,7 +2945,8 @@ export function apply(ctx, config) {
           estimate: { type: 'object', additionalProperties: true },
           items: { type: 'array', items: { type: 'object', additionalProperties: true } },
           comparison: { type: 'object', additionalProperties: true },
-          meta: { type: 'object', additionalProperties: true, properties: { source: { type: 'string' }, sourceKind: { type: 'string' }, chars: { type: 'number' }, chunks: { type: 'number' }, depth: { type: 'string' }, durationMs: { type: 'number' }, note: { type: 'string' }, files: { type: 'object', additionalProperties: true, properties: { md: { type: 'string' }, mm: { type: 'string' }, html: { type: 'string' } } } } },
+          stages: { type: 'object', additionalProperties: true, properties: { resolveMs: { type: 'number' }, extractMs: { type: 'number' }, llmMs: { type: 'number' }, calls: { type: 'number' } } },
+          meta: { type: 'object', additionalProperties: true, properties: { source: { type: 'string' }, sourceKind: { type: 'string' }, chars: { type: 'number' }, chunks: { type: 'number' }, depth: { type: 'string' }, durationMs: { type: 'number' }, note: { type: 'string' }, stages: { type: 'object', additionalProperties: true, properties: { resolveMs: { type: 'number' }, extractMs: { type: 'number' }, llmMs: { type: 'number' }, calls: { type: 'number' } } }, files: { type: 'object', additionalProperties: true, properties: { md: { type: 'string' }, mm: { type: 'string' }, html: { type: 'string' } } } } },
         },
       },
       render(args, value) {
@@ -2543,10 +2956,15 @@ export function apply(ctx, config) {
         return value
       },
     },
-    async execute(args) {
-      return analyze(args)
+    async execute(args, exec) {
+      return analyze(args, exec)
     },
   })
+
+  // 测试钩子：暴露纯函数便于单测（生产环境为附加属性，不影响工具注册）。
+  tool.__extractPdfText = extractPdfText
+  tool.__extractPdfStats = extractPdfStats
+  tool.__collectPageNums = collectPageNums
 
   ctx.effect(() => ctx.tools.register(tool))
 }
