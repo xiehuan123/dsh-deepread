@@ -162,25 +162,54 @@ export function apply(ctx, config) {
     return text
   }
 
-  // 带重试的 JSON 调用：解析失败时追加校正提示重试（最多 2 次重试）
+  // 判定输出是否被 token 预算截断：JSON 解析失败且文本未正常闭合（对象/数组中途断开）。
+  function looksTruncated(text) {
+    const t = String(text).trim()
+    if (t === '') return false
+    const last = t[t.length - 1]
+    return last !== '}' && last !== ']'
+  }
+
+  // 带重试的 JSON 调用：按失败类型分类重试。底层错误（上游失败、空结果）与
+  // 截断输出会逐步加大输出预算（×1.5，硬顶 16000），纯格式问题用校正提示
+  // 同预算重试；最终失败时保留每个 attempt 的真实原因，不做无信息的吞没。
   async function callModelJson(cfg, system, userText, maxTokens) {
-    let lastRaw = ''
+    const MAX_BUDGET = 16000
     let prompt = userText
+    let budget = maxTokens
+    const history = []
     for (let attempt = 0; attempt < 3; attempt++) {
       let text = ''
+      let error = null
       try {
-        text = await callModel(cfg, system, prompt, maxTokens)
+        text = await callModel(cfg, system, prompt, budget)
       } catch (err) {
-        // 空结果等一次调用失败：进入校正重试，而不是一击即溃
-        text = ''
+        error = err !== null && typeof err === 'object' && typeof err.message === 'string' ? err.message : String(err)
       }
-      lastRaw = text
-      const parsed = parseJson(text)
+      const parsed = error === null ? parseJson(text) : null
+      history.push({ text, error })
       if (parsed !== null) return parsed
-      prompt = userText + '\n\n[系统校正] 你上一次的输出为空或无法解析为 JSON（可能混入了解释文字、Markdown 围栏、尾随逗号，或字符串内直接换行）。请重新只输出一个合法的 JSON 对象：不要任何解释或额外文字，字符串内不要直接换行（多行文本用 \\n 转义），引号正确转义，末尾不要有逗号。'
+      const truncated = error === null && looksTruncated(text)
+      if (error !== null || truncated) {
+        budget = Math.min(Math.ceil(budget * 1.5), MAX_BUDGET)
+      }
+      if (error !== null) {
+        prompt = userText + '\n\n[系统校正] 上一次调用失败（' + error + '），已加大输出预算。请重新只输出一个合法的 JSON 对象：不要任何解释或额外文字。'
+      } else if (truncated) {
+        prompt = userText + '\n\n[系统校正] 你上一次的输出在 JSON 中途被截断（输出预算不足）。请大幅压缩篇幅——arguments 最多 6 条、quotes 最多 4 条、concepts 最多 5 条、questions 最多 4 条，每条只写一句话——并输出完整闭合的 JSON 对象，末尾以 } 结束。'
+      } else {
+        prompt = userText + '\n\n[系统校正] 你上一次的输出无法解析为 JSON（可能混入了解释文字、Markdown 围栏、尾随逗号，或字符串内直接换行）。请重新只输出一个合法的 JSON 对象：不要任何解释或额外文字，字符串内不要直接换行（多行文本用 \\n 转义），引号正确转义，末尾不要有逗号。'
+      }
     }
-    const shown = String(lastRaw).slice(0, 200)
-    throw new Error('模型输出无法解析为 JSON（已重试 3 次）。' + (shown.trim() === '' ? '三次输出均为空。' : '输出片段：' + shown))
+    const kinds = history.map((h) => {
+      if (h.error !== null) return '底层错误（' + h.error + '）'
+      if (looksTruncated(h.text)) return '输出被截断'
+      if (String(h.text).trim() === '') return '空输出'
+      return 'JSON 解析失败'
+    })
+    const tail = String(history[history.length - 1].text).trim()
+    const shown = tail.length > 160 ? tail.slice(-160) : tail
+    throw new Error('模型输出 3 次均未得到合法 JSON：' + kinds.join('；') + (shown === '' ? '' : '。末次输出尾部：' + shown))
   }
 
   // ---------- PDF 文本提取（纯 JS：inflate + ToUnicode） ----------
@@ -1211,7 +1240,7 @@ export function apply(ctx, config) {
       let parts = splitChunks(text, CHUNK_CHARS)
       if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS)
       for (let i = 0; i < parts.length; i++) {
-        const parsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 4000)
+        const parsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 5000)
         const s = sanitizeSection(parsed === null ? {} : parsed, '第 ' + (i + 1) + ' 部分')
         chapters.push({ title: s.title, summary: s.summary, thesis: s.thesis, arguments: s.arguments, quotes: s.quotes })
       }
@@ -1274,7 +1303,7 @@ export function apply(ctx, config) {
       let parts = splitChunks(text, CHUNK_CHARS)
       if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS)
       for (let i = 0; i < parts.length; i++) {
-        const parsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 4000)
+        const parsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(parts[i], i, parts.length), 5000)
         const s = sanitizeSection(parsed === null ? {} : parsed, '第 ' + (i + 1) + ' 部分')
         chapters.push({ title: s.title, summary: s.summary, thesis: s.thesis, arguments: s.arguments, quotes: s.quotes })
       }
@@ -1283,9 +1312,9 @@ export function apply(ctx, config) {
     let finalParsed = null
     if (chapters.length > 0) {
       const parts = chapters.map((c) => ({ title: c.title, summary: c.summary, thesis: c.thesis, arguments: c.arguments.slice(0, 3) }))
-      finalParsed = await callModelJson(cfg, finalSystem(language), finalUserFromParts(parts, text.length), 4000)
+      finalParsed = await callModelJson(cfg, finalSystem(language), finalUserFromParts(parts, text.length), 5000)
     } else {
-      finalParsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(text, 0, 1), 3500)
+      finalParsed = await callModelJson(cfg, sectionSystem('deep', language, focus), sectionUser(text, 0, 1), 4000)
     }
 
     if (finalParsed === null) {

@@ -1,7 +1,7 @@
 {
   "name": "dsh-deepread",
   "description": "DeepRead 精读助手：精读一本书或一篇文章，提取核心观点、论证结构与关键论据。五种模式（quick/deep/map/feynman/book），知识地图模式输出「观点—证据—数据—关系」结构化报告（含四档置信度、数据五要素、八种关系标注、Mermaid 思维导图与主动回忆问题）；支持微信公众号链接、.txt/.md/.html/.pdf 文件与粘贴文本（内置纯 JS PDF 文本提取器）；可选导出 .md / .mm（FreeMind，XMind 可导入）/ .html（编辑风网页报告）。",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "license": "MIT",
   "type": "module",
   "main": "./index.mjs",
