@@ -1,0 +1,4 @@
+# DeepRead bundle：向组合挂载 dsh-deepread（Node half 注册 deepread 工具）
+- insert:
+    - id: deepread
+      name: dsh-deepread
