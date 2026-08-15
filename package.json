@@ -16,7 +16,6 @@
   },
   "scripts": {
     "build:client": "node scripts/build-client.mjs",
-    "prepare": "node scripts/build-client.mjs",
     "prepack": "node scripts/build-client.mjs",
     "test": "node test/smoke.mjs && node test/client-bundle.mjs"
   },
