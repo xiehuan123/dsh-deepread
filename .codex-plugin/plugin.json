@@ -6,18 +6,9 @@
     "name": "xiehuan123",
     "url": "https://github.com/xiehuan123"
   },
-  "homepage": "https://github.com/xiehuan123/dsh-deepread",
-  "repository": "https://github.com/xiehuan123/dsh-deepread",
-  "license": "MIT",
-  "keywords": [
-    "reading",
-    "deep-read",
-    "knowledge-map",
-    "feynman",
-    "analysis",
-    "chinese"
-  ],
-  "skills": [
-    "./skills/dsh-deepread"
-  ]
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "DeepRead 精读助手",
+    "shortDescription": "Deep-read books and articles: extract core claims, arguments and evidence."
+  }
 }

@@ -1,17 +1,36 @@
 // DeepRead 精读助手 — Node half（官方 bundle 插件 Cordis entry）
 // 依赖 @deepseek-ai/* 由 profile pnpm 闭包注入，不在 package.json 声明。
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import Schema from '@deepseek-ai/schemastery'
+
+export const Config = Schema.object({
+  timeoutMs: Schema.number().default(900000),
+  chunkChars: Schema.number().default(6000),
+  maxParts: Schema.number().default(20),
+  maxInputChars: Schema.number().default(400000),
+})
 
 export const name = 'deepread'
-export const inject = ['fs', 'llm', 'tools']
+export const inject = ['fs', 'llm', 'tools', 'web', 'agentDefaultModel', 'sandboxPolicy']
 
-export function apply(ctx) {
-  const CHUNK_CHARS = 6000
-  const MAX_PARTS = 20
+export function apply(ctx, config) {
+  const cfg = config !== null && typeof config === 'object' ? config : {}
+  const tune = {
+    timeoutMs: num(cfg.timeoutMs, 900000),
+    chunkChars: num(cfg.chunkChars, 6000),
+    maxParts: num(cfg.maxParts, 20),
+    maxInputChars: num(cfg.maxInputChars, 400000),
+  }
+  const CHUNK_CHARS = tune.chunkChars
+  const MAX_PARTS = tune.maxParts
   const web = ctx.get('web')
 
   function str(v, fallback) {
     return typeof v === 'string' && v.trim() !== '' ? v.trim() : fallback
+  }
+
+  function num(v, fallback) {
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback
   }
 
   function arr(v) {
@@ -1165,7 +1184,7 @@ export function apply(ctx) {
     const source = src.source
     const sourceKind = src.sourceKind
     if (text.trim() === '') throw new Error('没有可分析的内容')
-    if (text.length > 400000) text = text.slice(0, 400000)
+    if (text.length > tune.maxInputChars) text = text.slice(0, tune.maxInputChars)
 
     const cfg = await pickConfig()
 
@@ -1786,7 +1805,7 @@ export function apply(ctx) {
   const tool = defineTool({
     name: 'deepread',
     description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。五种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；feynman=费曼读书法（浏览目录→提出问题→分章阅读→提取观点数据证据→章节导图→合上书讲解→自检知识缺口→回原文修正→合并全书导图→再讲一次→间隔复习计划）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）。知乎/掘金等反爬站点请粘贴正文。',
-    timeoutMs: 900000,
+    timeoutMs: tune.timeoutMs,
     parameters: {
       url: { type: 'string', description: '要精读的网页链接。仅支持微信公众号（mp.weixin.qq.com）的稳定链接；知乎/掘金等有反爬的站点不支持，请粘贴正文。与 path/text 至少提供一个。' },
       text: { type: 'string', description: '要精读的文本内容，直接粘贴。与 url/path 至少提供一个。' },

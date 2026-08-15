@@ -97,12 +97,38 @@ npx skills@latest add xiehuan123/dsh-deepread      # 或 skills.sh
 ├── package.json            # dsh.bundle + dsh.client + dsh.skills
 ├── cordis.patch.yml        # insert 挂载自身
 ├── index.mjs               # Node half：Cordis entry（deepread 工具 + PDF/HTML 解析 + 三格式导出）
-├── lib/client.js           # Client half：__ModuleLoader__ 注册（结果卡片 + 输入区精读条）
-├── skills/deepread/        # Codex / Claude Code 兼容 skill（SKILL.md + references）
-└── .claude-plugin/         # Claude Code / Codex 插件清单（plugin.json + marketplace.json）
+├── src/client/index.js     # Client source：结果卡片 + 输入区精读条 + 精读面板（工厂包体）
+├── scripts/build-client.mjs# 将 client source 打包为 C6 工厂包产物 lib/client.js（勿手改）
+├── lib/client.js           # Client half（生成产物）：__ModuleLoader__.load({ id, factory })
+├── test/                   # 冒烟测试：Node 工具链路 + client 工厂包契约
+├── skills/dsh-deepread/    # Codex / Claude Code 兼容 skill（SKILL.md + references + agents/openai.yaml）
+├── .claude-plugin/         # Claude Code 插件清单（plugin.json + marketplace.json）
+└── .codex-plugin/          # Codex 插件清单（plugin.json）
 ```
 
-依赖 `@deepseek-ai/*` 官方包由 profile pnpm 闭包注入，不在 package.json 声明。
+`@deepseek-ai/*` 官方包（cordis / dsh-tools / schemastery）与 `react` 由宿主 profile 提供，在
+`peerDependencies` 中声明（`*` 表示跟随宿主版本）；`dsh.client.inject` 声明客户端依赖边
+（dsh-client-runtime 提供 slots/sessions，dsh-client-ui-conversation 提供 conversation）。
+
+## 插件配置（Config）
+
+`timeoutMs`（默认 900000）、`chunkChars`（默认 6000）、`maxParts`（默认 20）、
+`maxInputChars`（默认 400000）均可在 cordis 行配置中覆盖，例如：
+
+```yaml
+- insert:
+    - id: deepread
+      name: dsh-deepread
+      config:
+        timeoutMs: 600000
+```
+
+## 开发
+
+```sh
+npm run build:client   # 从 src/client/index.js 重新生成 lib/client.js
+npm test               # Node 工具链路冒烟 + client 工厂包契约测试
+```
 
 ## License
 

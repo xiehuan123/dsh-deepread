@@ -1,5 +1,5 @@
 ---
-name: deepread
+name: dsh-deepread
 description: 精读一本书或一篇文章：提取核心观点、论证结构与关键论据。当用户要求「精读/分析这篇文章」「提取核心观点」「梳理论证逻辑」「做知识地图」「用费曼读书法读书」时使用本技能。五种模式：quick 快速要点 / deep 深度精读 / map 知识地图 / feynman 费曼读书法 / book 全书精读。Deep-reading assistant for books and articles: extract core claims, arguments and evidence.
 ---
 
