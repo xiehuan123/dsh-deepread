@@ -1,129 +1,138 @@
-# 📖 DeepRead 精读助手（dsh-deepread）
+# 📖 DeepRead Assistant (dsh-deepread)
 
-> 精读一本书或一篇文章：提取核心观点、论证结构与关键论据，输出「观点—证据—数据—关系」结构化报告。
-> 官方 bundle 插件：Node half 注册 `deepread` 工具，client half 提供结果卡片与输入区精读条。
+English | [中文](README.zh.md)
 
+> Deep-read a book or an article: extract core claims, argument structure, and key evidence into a structured "claim–evidence–data–relation" report.
+> Official bundle plugin: the Node half registers the `deepread` tool, the client half provides the result card and the reading bar in the input area.
+
+[![npm version](https://img.shields.io/npm/v/dsh-deepread)](https://www.npmjs.com/package/dsh-deepread)
 [![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin)
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## 功能
+## Features
 
-| 能力 | 说明 |
+| Capability | Details |
 | --- | --- |
-| 🎛️ 五种模式 | `quick` 快速抓要点 · `deep` 深度精读 · `map` 知识地图 · `feynman` 费曼读书法（11 步闭环 + 间隔复习）· `book` 整本书分部分精读（对比见下方「五种模式对比」） |
-| 🗺️ 知识地图模式 | 核心问题 / 核心结论 / 十类内容分类（核心结论、分论点、原因或作用机制、事实、数据、案例、隐含前提、反对意见、限制条件、可执行建议）/ 观点必配证据（无证据标注「原文未提供证据」）/ 关键数据表（数值与单位、时间范围、样本、比较基准、来源、位置）/ 八种关系标注（支持、反驳、导致、解释、取决于、举例、对比、限制）/ **四档置信度**（作者原意、原文事实与数据、合理推断、无法确认）/ Mermaid 思维导图 / XMind 大纲 / 5 个主动回忆问题 |
-| 📥 三种输入 | 微信公众号链接（`mp.weixin.qq.com` 稳定链接）· 文件（`.txt/.md/.html/.pdf`，PDF 内置纯 JS 提取器，含中文 ToUnicode 映射与页码标记）· 粘贴文本 |
-| 📤 可选导出 | 默认只在会话中展示；`export` 参数可选 `md` / `mm`（FreeMind，XMind 可导入）/ `html`（编辑风网页报告，深浅色自适应）/ `all`，写入工作区 `deepread-output/` |
-| 🎨 浏览器 UI | `deepread` 工具结果卡片（置信度四色图例、折叠分区）+ 输入区左侧 📖 快捷按钮，点击弹出卡片式精读面板（链接/路径/正文 + 模式/导出选择 + 关注重点 + 一键开始） |
+| 🎛️ Five modes | `quick` key takeaways · `deep` in-depth reading · `map` knowledge map · `feynman` Feynman technique (11-step loop + spaced repetition) · `book` whole-book reading (see the comparison below) |
+| 🗺️ Knowledge-map mode | Core question / core conclusion / ten content categories (conclusion, sub-claim, mechanism, fact, data, case, hidden premise, objection, limitation, actionable advice) / every claim paired with evidence (unverifiable claims marked "no evidence provided in the original text") / key data table (value & unit, time range, sample, baseline, source, location) / eight relation labels (supports, refutes, causes, explains, depends on, exemplifies, contrasts, limits) / **four confidence levels** (author intent, original facts & data, reasonable inference, unverifiable) / Mermaid mindmap / XMind outline / 5 active-recall questions |
+| 📥 Three inputs | WeChat article URLs (`mp.weixin.qq.com` stable links) · files (`.txt/.md/.html/.pdf`, PDF via a built-in pure-JS extractor with Chinese ToUnicode mapping and page markers) · pasted text |
+| 📤 Optional export | Displayed in-session by default; `export` accepts `md` / `mm` (FreeMind, importable by XMind) / `html` (editor-style web report with light/dark theme) / `all`, written to `deepread-output/` in the workspace |
+| 🎨 Browser UI | `deepread` tool result card (four-color confidence legend, collapsible sections) + a 📖 shortcut button next to the input area that opens a card-style reading panel (link/path/text + mode/export selection + reading focus + one-click start) |
 
-## 五种模式对比
+## Five modes compared
 
-| 模式 | 适合场景 | 输出要点 | 代价 |
+| Mode | Best for | Key output | Cost |
 | --- | --- | --- | --- |
-| `quick` 快速要点 | 「这篇文章讲啥？」速览 | 一句话总结、核心论点、论证结构、金句、核心概念、批判性问题 | 单次调用，最快 |
-| `deep` 深度精读（默认） | 认真读懂一篇文章 | 概述、核心论点、论证结构（论点+论据+原文引文）、论证脉络、各部分要点、金句、核心概念、批判性思考 | 长文自动分段，逐段+汇总 |
-| `map` 知识地图 | 研究、查证、写引用前的事实核查 | 核心问题与结论、十类内容分类、观点必配证据、关键数据表（五要素）、八种关系、四档置信度、Mermaid 导图、XMind 大纲、主动回忆问题 | 结构化管线，多次调用 |
-| `feynman` 费曼读书法 | 真正学会、能给别人讲 | 11 步闭环：目录→提问→分章→观点/数据/证据→章节导图→合上书讲解→自检缺口→回原文修正→合并导图→再讲一次→第 1/3/7/14/30 天间隔复习 | 输出最长、调用最多 |
-| `book` 全书精读 | 整本书 / 超长文本 | 目录、章节脉络、分部分精读后汇总的全书总结 | 按部分分批处理 |
+| `quick` | "What is this article about?" at a glance | One-line summary, core claim, argument structure, quotes, key concepts, critical questions | Single call, fastest |
+| `deep` (default) | Reading one article carefully | Overview, core claim, argument structure (claim + evidence + verbatim quotes), argument flow, section highlights, quotes, key concepts, critical thinking | Long articles are auto-split, section-by-section + summary |
+| `map` | Research, fact-checking before citing | Core question & conclusion, ten content categories, claim-evidence pairing, key data table (five elements), eight relations, four confidence levels, Mermaid mindmap, XMind outline, active-recall questions | Structured pipeline, multiple calls |
+| `feynman` | Truly learning it and teaching it to others | 11-step loop: TOC → questions → per-chapter → claims/data/evidence → chapter mindmap → explain with the book closed → self-check gaps → correct against the source → merged mindmap → explain again → spaced review on days 1/3/7/14/30 | Longest output, most calls |
+| `book` | Whole books / very long texts | Table of contents, chapter flow, a full-book summary assembled from per-part deep reads | Processed part by part |
 
-一句话选型：赶时间用 `quick`；读透一篇用 `deep`；要引证查事实用 `map`；要真学会并记住用 `feynman`；整本书用 `book`。
+One-line picker: in a hurry, `quick`; read one article thoroughly, `deep`; cite and fact-check, `map`; learn and remember, `feynman`; a whole book, `book`.
 
-## 安装
+## Installation
 
-### DeepSeek Harness（工具 + Web UI，完整功能）
+### DeepSeek Harness (tool + Web UI, full functionality)
 
-需要本机已安装 **pnpm**（`dsh plugin` 命令底层调用 pnpm 安装插件）与 Node.js ≥ 22。
+Requires **pnpm** on the machine (`dsh plugin` runs pnpm underneath to install plugins) and Node.js ≥ 22.
 
 ```sh
-# 默认安装仓库最新 HEAD（当前版本 v0.3.1）
-dsh plugin --profile web add "github:xiehuan123/dsh-deepread"
+# From npm (prebuilt, no build authorization needed)
+dsh plugin --profile web add dsh-deepread
 
-# 指定版本：发布 tag 后可用（如 v0.3.1）
-dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v0.3.1"
+# Pin a version
+dsh plugin --profile web add dsh-deepread@^0.3.9
+
+# From GitHub (source; build artifacts are committed)
+dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v0.3.9"
 ```
 
-重启 dsh web 后生效。输入区左侧出现 📖 快捷按钮，点击弹出卡片式精读面板。对话中也可直接说「用知识地图模式精读这篇文章：<内容>」。
+Restart `dsh web` for it to take effect. A 📖 shortcut button appears next to the input area; click it to open the card-style reading panel. You can also just say: "Read this article in knowledge-map mode: <content>".
 
-> 提示：`dsh plugin` 会以 pnpm 在 profile 目录内安装依赖；安装后若仍报「网页抓取服务不可用」，请在 profile 的 `cordis.patch.yml` 中挂载 `@deepseek-ai/dsh-web-fetch-http` 并为它配置浏览器 User-Agent（微信有反爬验证页）。
+> Tip: fetching WeChat article URLs needs an HTTP provider. If you see "web fetch service unavailable" after install, mount `@deepseek-ai/dsh-web-fetch-http` in the profile's `cordis.patch.yml` and give it a browser User-Agent (WeChat serves an anti-bot verification page).
 
-### Codex / Claude Code（skill 形态，零依赖）
+### Codex / Claude Code (skill form, zero dependencies)
 
-安装（三选一）：
+Install (pick one):
 
 ```bash
-claude plugin install xiehuan123/dsh-deepread      # 终端命令（Codex 兼容）
-/plugin install xiehuan123/dsh-deepread            # 或会话内斜杠命令
-npx skills@latest add xiehuan123/dsh-deepread      # 或 skills.sh
+claude plugin install xiehuan123/dsh-deepread      # terminal command (Codex compatible)
+/plugin install xiehuan123/dsh-deepread            # or the in-session slash command
+npx skills@latest add xiehuan123/dsh-deepread      # or skills.sh
 ```
 
-**使用说明**（Codex / Claude Code 通用）：
+**Usage** (Codex / Claude Code):
 
-1. **触发**：直接说一句包含「精读 / 分析 / 知识地图 / 费曼」的话，例如
-   - `精读一下 docs/architecture.md`
-   - `用知识地图模式分析这篇文章：<粘贴正文>`
-   - `用费曼读书法读这本书，给我复习计划`
-   - `快速抓一下这篇公众号文章的要点：https://mp.weixin.qq.com/s/xxxx`
-2. **模式**：agent 会按诉求自动选择（默认 `deep`），五种模式见上表；不确定时它会问你要哪种。
-3. **输入**：文件路径 / 网页链接（微信公众号可直接抓；知乎/掘金等反爬站点请粘贴正文）/ 直接粘贴文本，PDF 也能处理（agent 会按 `SKILL.md` 的指引抽取文本，扫描版建议先 OCR）。
-4. **输出**：默认只在对话里给 Markdown 报告；你说「导出 html / 导图 / md」时，它会把报告写入工作区 `deepread-output/`（`.md` 报告、`.mm` FreeMind 思维导图【XMind 可导入】、`.html` 网页报告）。
-5. **知识地图模式**：输出含四档置信度（作者原意/原文事实与数据/合理推断/无法确认），每条观点配证据——原文没有证据会明确标「原文未提供证据」。
-6. **费曼模式**：完整 11 步（目录→提问→分章→观点数据证据→章节导图→合上书讲解→自检缺口→回原文修正→合并导图→再讲一次→第 1/3/7/14/30 天间隔复习计划）。
+1. **Trigger**: say something containing "deep-read / analyze / knowledge map / Feynman", e.g.
+   - `Deep-read docs/architecture.md`
+   - `Analyze this article in knowledge-map mode: <paste text>`
+   - `Read this book with the Feynman technique and give me a review plan`
+   - `Quickly summarize this WeChat article: https://mp.weixin.qq.com/s/xxxx`
+2. **Mode**: the agent picks a mode automatically (default `deep`); it asks when unsure.
+3. **Input**: file path / web link (WeChat articles are fetched directly; for anti-bot sites like Zhihu/Juejin, paste the text) / pasted text. PDFs work too (the agent extracts text per `SKILL.md`; scan-only PDFs should be OCR'd first).
+4. **Output**: a Markdown report in the conversation by default; say "export html / mindmap / md" and it writes to `deepread-output/` in the workspace (`.md` report, `.mm` FreeMind mindmap [importable by XMind], `.html` web report).
+5. **Knowledge-map mode**: output carries four confidence levels (author intent / original facts & data / reasonable inference / unverifiable), and every claim is paired with evidence — the original text lacking evidence is explicitly marked "no evidence provided in the original text".
+6. **Feynman mode**: the full 11 steps (TOC → questions → per-chapter → claims/data/evidence → chapter mindmap → explain with the book closed → self-check gaps → correct against the source → merged mindmap → explain again → spaced review on days 1/3/7/14/30).
 
-> 提示：Codex 版的 skill 是「方法论」形态——由 agent 用自己的工具执行分析；DSH 版的 `deepread` 是「工具」形态——由插件直接调用模型跑流水线。两者输出格式一致，可互相迁移（把导出的 `.md`/`.html` 交给任一端的 agent 都能继续工作）。
+> Note: the Codex/Claude skill is the "methodology" form — the agent performs the analysis with its own tools; the DSH `deepread` is the "tool" form — the plugin runs the pipeline by calling the model directly. Output formats are identical and interchangeable (an exported `.md`/`.html` keeps working when handed to an agent on either host).
 
-## 使用示例
+## Examples
 
 ```
-请用 deepread 精读这个链接：https://mp.weixin.qq.com/s/xxxx
-用知识地图模式精读 book.pdf，导出 html
-快速抓一下这篇文章的要点：<粘贴文本>
+Please deep-read this link: https://mp.weixin.qq.com/s/xxxx
+Read book.pdf in knowledge-map mode and export html
+Quickly summarize this article: <paste text>
 ```
 
-## 参数
+## Parameters
 
-| 参数 | 类型 | 说明 |
+| Parameter | Type | Description |
 | --- | --- | --- |
-| `url` | string | 微信公众号稳定链接（仅 mp.weixin.qq.com；知乎/掘金等反爬站点请粘贴正文） |
-| `path` | string | 工作区文件路径（.txt/.md/.markdown/.html/.pdf） |
-| `text` | string | 粘贴文本 |
-| `depth` | enum | `quick` / `deep`（默认）/ `map` / `feynman` / `book` |
-| `export` | enum | `none`（默认，仅会话展示）/ `md` / `mm` / `html` / `all` |
-| `refresh` | boolean | `true` 强制重新抓取并刷新缓存（默认 `false`：同一链接命中缓存直接复用全文，不联网） |
-| `focus` | string | 读者关注角度，如「论证逻辑」「研究方法」 |
-| `language` | enum | `zh` / `en` / `auto`（默认） |
+| `url` | string | Stable WeChat article link (`mp.weixin.qq.com` only; for anti-bot sites, paste the text) |
+| `path` | string | Workspace file path (`.txt/.md/.markdown/.html/.pdf`) |
+| `text` | string | Pasted text |
+| `depth` | enum | `quick` / `deep` (default) / `map` / `feynman` / `book` |
+| `export` | enum | `none` (default, in-session only) / `md` / `mm` / `html` / `all` |
+| `refresh` | boolean | `true` forces a re-fetch and cache refresh (default `false`: a cached URL reuses the stored full text without network access) |
+| `focus` | string | Reader's angle of interest, e.g. "argumentation logic", "research methodology" |
+| `language` | enum | `zh` / `en` / `auto` (default) |
 
-## 仓库结构
+## Repository layout
 
 ```
 ├── package.json            # dsh.bundle + dsh.client + dsh.skills
-├── cordis.patch.yml        # insert 挂载自身
-├── index.mjs               # Node half：Cordis entry（deepread 工具 + PDF/HTML 解析 + 三格式导出）
-├── src/client/index.js     # Client source：结果卡片 + 输入区精读条 + 精读面板（工厂包体）
-├── scripts/build-client.mjs# 将 client source 打包为 C6 工厂包产物 lib/client.js（勿手改）
-├── lib/client.js           # Client half（生成产物）：__ModuleLoader__.load({ id, factory })
-├── test/                   # 冒烟测试：Node 工具链路 + client 工厂包契约
-├── skills/dsh-deepread/    # Codex / Claude Code 兼容 skill（SKILL.md + references + agents/openai.yaml）
-├── .claude-plugin/         # Claude Code 插件清单（plugin.json + marketplace.json）
-└── .codex-plugin/          # Codex 插件清单（plugin.json）
+├── cordis.patch.yml        # inserts itself into the composition
+├── index.mjs               # Node half: Cordis entry (deepread tool + PDF/HTML parsing + three export formats)
+├── src/client/index.js     # Client source: result card + reading bar + reading panel (factory bundle)
+├── scripts/build-client.mjs# bundles client source into the C6 factory artifact lib/client.js (do not edit by hand)
+├── lib/client.js           # Client half (generated): __ModuleLoader__.load({ id, factory })
+├── test/                   # smoke tests: Node tool pipeline + client factory-bundle contract
+├── skills/dsh-deepread/    # Codex / Claude Code compatible skill (SKILL.md + references + agents/openai.yaml)
+├── .claude-plugin/         # Claude Code plugin manifests (plugin.json + marketplace.json)
+└── .codex-plugin/          # Codex plugin manifest (plugin.json)
 ```
 
-`@deepseek-ai/*` 官方包（cordis / dsh-tools / schemastery / dsh-storage-domain）与 `zod`、`react`
-由宿主 profile 提供，在 `peerDependencies` 中声明（`*` 表示跟随宿主版本）；`dsh.client.inject`
-声明客户端依赖边（dsh-client-runtime 提供 slots/sessions，dsh-client-ui-conversation 提供 conversation）。
+The `@deepseek-ai/*` host packages (cordis / dsh-tools / schemastery / dsh-storage-domain) plus `zod` and `react`
+are provided by the host profile and declared in `peerDependencies` (`*` means "follow the host version");
+`dsh.client.inject` declares the client-side dependency edges (dsh-client-runtime provides slots/sessions,
+dsh-client-ui-conversation provides conversation).
 
-## 全文缓存
+## Full-text cache
 
-URL 抓取的全文按官方 storageDomain 约定落盘：`deepread_url_cache` 领域（版本 1，zod schema
-校验，记录含 `url`/`text`/`fetchedAt`），存于 `$DSH_HOME/storages/`，跨进程重启仍然有效。
-同一篇文章换模式（deep→map/feynman/book）直接复用缓存、不再联网；抓取失败时自动回退缓存并
-在报告中注明。TTL 默认 7 天，条目上限 200（写入时惰性清理过期项）。未挂载 storage 的
-profile（如无 web 组合包的 headless）自动降级为进程内缓存。
+Fetched article full texts are persisted following the official storageDomain convention: the
+`deepread_url_cache` domain (version 1, zod-schema validated, records hold `url`/`text`/`fetchedAt`),
+stored under `$DSH_HOME/storages/` and surviving process restarts. Re-reading the same article in a
+different mode (deep→map/feynman/book) reuses the cache without network access; when a fetch fails the
+cache is used as a fallback and the report says so. Default TTL is 7 days with a cap of 200 entries
+(expired entries are lazily removed on write). Profiles without storage mounted (e.g. a headless
+composition without the web bundle) automatically degrade to an in-process cache.
 
-## 插件配置（Config）
+## Plugin configuration (Config)
 
-`timeoutMs`（默认 900000）、`chunkChars`（默认 6000）、`maxParts`（默认 20）、
-`maxInputChars`（默认 400000）、`cacheEnabled`（默认 true）、`cacheTtlHours`（默认 168，
-0 表示不缓存）均可在 cordis 行配置中覆盖，例如：
+`timeoutMs` (default 900000), `chunkChars` (default 6000), `maxParts` (default 20),
+`maxInputChars` (default 400000), `cacheEnabled` (default true), `cacheTtlHours` (default 168,
+0 disables caching) can all be overridden in the cordis row, for example:
 
 ```yaml
 - insert:
@@ -134,11 +143,11 @@ profile（如无 web 组合包的 headless）自动降级为进程内缓存。
         cacheTtlHours: 24
 ```
 
-## 开发
+## Development
 
 ```sh
-npm run build:client   # 从 src/client/index.js 重新生成 lib/client.js
-npm test               # Node 工具链路冒烟 + client 工厂包契约测试
+npm run build:client   # regenerate lib/client.js from src/client/index.js
+npm test               # Node tool pipeline smoke + client factory-bundle contract tests
 ```
 
 ## License
