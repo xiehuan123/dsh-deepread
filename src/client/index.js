@@ -71,6 +71,18 @@ const React = require("react")
       '.dr-depth-on, .dr-export-on { color: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); }',
       '.dr-submit { background: var(--dsw-alias-brand-primary); color: #fff; border: none; border-radius: 8px; padding: 7px 12px; cursor: pointer; font-size: 13px; font-weight: 600; }',
       '.dr-submit:disabled { opacity: 0.6; cursor: default; }',
+      '.dr-history { display: flex; flex-direction: column; gap: 4px; }',
+      '.dr-history-empty { color: var(--dsw-alias-label-secondary); font-size: 12px; padding: 4px 0; }',
+      '.dr-history-item { border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); overflow: hidden; }',
+      '.dr-history-head { display: flex; align-items: flex-start; gap: 6px; width: 100%; background: none; border: none; padding: 6px 8px; cursor: pointer; text-align: left; box-sizing: border-box; }',
+      '.dr-history-arrow { color: var(--dsw-alias-label-secondary); width: 12px; flex-shrink: 0; margin-top: 1px; }',
+      '.dr-history-main { flex: 1; min-width: 0; }',
+      '.dr-history-title { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary); line-height: 1.4; word-break: break-all; }',
+      '.dr-history-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; flex-wrap: wrap; }',
+      '.dr-history-time { color: var(--dsw-alias-label-secondary); font-size: 11px; }',
+      '.dr-history-detail { padding: 2px 8px 8px; }',
+      '.dr-history-reread { background: none; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; padding: 2px 10px; cursor: pointer; color: var(--dsw-alias-brand-primary); font-size: 12px; margin-top: 6px; }',
+      '.dr-history-reread:hover { border-color: var(--dsw-alias-brand-primary); }',
     ].join('\n')
     function injectCss(css) {
       if (typeof document === 'undefined') return () => {}
@@ -323,8 +335,109 @@ const React = require("react")
       )
     }
 
+    // ——— 「📚 最近读过」历史（纯客户端 localStorage，无 host RPC） ———
+    const HISTORY_KEY = 'dsh-deepread-history-v1'
+    const HISTORY_MAX = 20
+    const HISTORY_KINDS = ['article', 'book', 'map', 'feynman', 'batch']
+
+    function historyKindAllowed(kind) {
+      return HISTORY_KINDS.indexOf(kind) !== -1
+    }
+    function readHistory() {
+      if (typeof localStorage === 'undefined') return []
+      try {
+        const raw = localStorage.getItem(HISTORY_KEY)
+        if (raw === null || raw === '') return []
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed) ? parsed : []
+      } catch (err) {
+        return []
+      }
+    }
+    function writeHistory(record) {
+      if (typeof localStorage === 'undefined') return
+      try {
+        const list = readHistory()
+        const idx = list.findIndex((it) => it !== null && typeof it === 'object' && it.id === record.id)
+        if (idx !== -1) list.splice(idx, 1)
+        list.unshift(record)
+        if (list.length > HISTORY_MAX) list.length = HISTORY_MAX
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(list))
+      } catch (err) {
+        // localStorage 不可用或写入失败：静默忽略
+      }
+    }
+    function relativeTime(time) {
+      if (typeof time !== 'number' || !isFinite(time)) return ''
+      const diff = Date.now() - time
+      const minute = 60 * 1000
+      const hour = 60 * minute
+      const day = 24 * hour
+      if (diff < minute) return '刚刚'
+      if (diff < hour) return Math.floor(diff / minute) + ' 分钟前'
+      if (diff < day) return Math.floor(diff / hour) + ' 小时前'
+      if (diff < 2 * day) return '昨天'
+      if (diff < 7 * day) return Math.floor(diff / day) + ' 天前'
+      const d = new Date(time)
+      const mm = String(d.getMonth() + 1)
+      const dd = String(d.getDate())
+      return d.getFullYear() + '-' + (mm.length < 2 ? '0' + mm : mm) + '-' + (dd.length < 2 ? '0' + dd : dd)
+    }
+    function HistoryItem(props) {
+      const item = props.item !== null && typeof props.item === 'object' ? props.item : {}
+      const [open, setOpen] = React.useState(false)
+      const title = typeof item.title === 'string' ? item.title : ''
+      const displayTitle = title.length > 40 ? title.slice(0, 40) + '…' : title
+      const depthLabel = DEPTH_LABELS[item.depth] !== undefined ? DEPTH_LABELS[item.depth] : '精读'
+      const timeText = relativeTime(item.time)
+      const summary = typeof item.summary === 'string' ? item.summary : ''
+      const thesis = typeof item.thesis === 'string' ? item.thesis : ''
+      const onReread = props.onReread
+      return React.createElement('div', { className: 'dr-history-item' },
+        React.createElement('button', { type: 'button', className: 'dr-history-head', title: title, onClick: () => setOpen(!open) },
+          React.createElement('span', { className: 'dr-history-arrow' }, open ? '▾' : '▸'),
+          React.createElement('div', { className: 'dr-history-main' },
+            React.createElement('div', { className: 'dr-history-title' }, displayTitle),
+            React.createElement('div', { className: 'dr-history-meta' },
+              badge(depthLabel),
+              timeText !== '' ? React.createElement('span', { className: 'dr-history-time' }, timeText) : null,
+            ),
+          ),
+        ),
+        open ? React.createElement('div', { className: 'dr-history-detail' },
+          summary !== '' ? React.createElement('div', { className: 'dr-summary' }, summary) : null,
+          thesis !== '' ? React.createElement('div', { className: 'dr-thesis' },
+            React.createElement('div', { className: 'dr-thesis-label' }, '核心论点'),
+            thesis,
+          ) : null,
+          typeof onReread === 'function' ? React.createElement('button', { type: 'button', className: 'dr-history-reread', onClick: () => onReread(item) }, '↺ 重新精读') : null,
+        ) : null,
+      )
+    }
+
     function DeepReadCard(props) {
       const block = props.block
+      const value = block !== null && typeof block === 'object' && block.meta !== null && typeof block.meta === 'object' ? block.meta : null
+      React.useEffect(() => {
+        if (value === null) return
+        if (value.kind === 'estimate') return
+        if (!historyKindAllowed(value.kind)) return
+        const title = typeof value.title === 'string' ? value.title : ''
+        if (title === '') return
+        const meta = value.meta !== null && typeof value.meta === 'object' ? value.meta : {}
+        const source = typeof meta.source === 'string' ? meta.source : ''
+        writeHistory({
+          id: String(source) + '|' + value.kind + '|' + title,
+          title: title,
+          kind: value.kind,
+          depth: typeof meta.depth === 'string' ? meta.depth : '',
+          source: source,
+          chars: typeof meta.chars === 'number' ? meta.chars : 0,
+          time: Date.now(),
+          summary: typeof value.summary === 'string' ? value.summary : '',
+          thesis: typeof value.thesis === 'string' ? value.thesis : '',
+        })
+      }, [value])
       const settled = block !== null && typeof block === 'object' && (Array.isArray(block.content) || block.meta !== undefined)
       if (!settled) {
         return React.createElement('div', { className: 'dr-card' },
@@ -375,6 +488,12 @@ const React = require("react")
       const [depth, setDepth] = React.useState('deep')
       const [exportFmt, setExportFmt] = React.useState('none')
       const [error, setError] = React.useState(null)
+      const [history, setHistory] = React.useState([])
+      const panelRef = React.useRef(null)
+
+      React.useEffect(() => {
+        if (open) setHistory(readHistory().slice(0, 8))
+      }, [open])
 
       if (!open) return null
 
@@ -426,7 +545,14 @@ const React = require("react")
         onClick: () => setExportFmt(value),
       }, label)
 
-      return React.createElement('div', { className: 'dr-panel' },
+      const reread = (item) => {
+        if (item !== null && typeof item === 'object' && typeof item.source === 'string' && item.source !== '') {
+          setText(item.source)
+        }
+        if (panelRef.current !== null && panelRef.current !== undefined) panelRef.current.scrollTop = 0
+      }
+
+      return React.createElement('div', { className: 'dr-panel', ref: panelRef },
         React.createElement('div', { className: 'dr-panel-head' },
           React.createElement('span', null, '📖 精读助手'),
           React.createElement('button', { type: 'button', className: 'dr-close', title: '关闭', onClick: () => setOpen(false) }, '✕'),
@@ -450,6 +576,12 @@ const React = require("react")
           value: path,
           onChange: (event) => setPath(event.target.value),
         }),
+        React.createElement(Section, { title: '📚 最近读过', count: history.length, defaultOpen: true },
+          history.length === 0 ? React.createElement('div', { className: 'dr-history-empty' }, '还没有精读记录，完成一次精读后会自动出现在这里。') : null,
+          React.createElement('div', { className: 'dr-history' },
+            history.map((item, i) => React.createElement(HistoryItem, { item: item, onReread: reread, key: 'h-' + i })),
+          ),
+        ),
         React.createElement('div', { className: 'dr-row' },
           React.createElement('span', { className: 'dr-label' }, '深度'),
           depthOption('quick', '快速'),

@@ -12,6 +12,8 @@ export const Config = Schema.object({
   maxInputChars: Schema.number().default(400000),
   cacheEnabled: Schema.boolean().default(true),
   cacheTtlHours: Schema.number().default(168),
+  estTokensPerSecond: Schema.number().default(30),
+  estLatencyPerCallMs: Schema.number().default(800),
 })
 
 // URL 抓取全文缓存领域声明：与官方 workspaceDomainSpec 同构——zod schema 即
@@ -40,6 +42,8 @@ export function apply(ctx, config) {
     maxInputChars: num(cfg.maxInputChars, 400000),
     cacheEnabled: typeof cfg.cacheEnabled === 'boolean' ? cfg.cacheEnabled : true,
     cacheTtlHours: typeof cfg.cacheTtlHours === 'number' && Number.isFinite(cfg.cacheTtlHours) && cfg.cacheTtlHours >= 0 ? cfg.cacheTtlHours : 168,
+    estTokensPerSecond: num(cfg.estTokensPerSecond, 30),
+    estLatencyPerCallMs: num(cfg.estLatencyPerCallMs, 800),
   }
   const CACHE_TTL_MS = tune.cacheTtlHours * 3600 * 1000
   const CACHE_MAX_ENTRIES = 200
@@ -1269,15 +1273,22 @@ export function apply(ctx, config) {
   function sanitizeArguments(raw) {
     return arr(raw).slice(0, 10).map((a) => {
       const ao = a !== null && typeof a === 'object' ? a : { claim: String(a) }
-      return { claim: str(ao.claim, ''), evidence: str(ao.evidence, ''), quote: str(ao.quote, '') }
+      return { claim: str(ao.claim, ''), evidence: str(ao.evidence, ''), quote: str(ao.quote, ''), source: str(ao.source, '') }
     }).filter((a) => a.claim !== '' || a.evidence !== '')
   }
 
   function sanitizeQuotes(raw) {
     return arr(raw).slice(0, 8).map((q) => {
       const qo = q !== null && typeof q === 'object' ? q : { text: String(q) }
-      return { text: str(qo.text, ''), context: str(qo.context, '') }
+      return { text: str(qo.text, ''), context: str(qo.context, ''), source: str(qo.source, '') }
     }).filter((q) => q.text !== '')
+  }
+
+  function sanitizeCitations(raw) {
+    return arr(raw).slice(0, 8).map((c) => {
+      const co = c !== null && typeof c === 'object' ? c : { claim: String(c) }
+      return { claim: str(co.claim, ''), source: str(co.source, ''), quote: str(co.quote, '') }
+    }).filter((c) => c.claim !== '' || c.quote !== '')
   }
 
   function sanitizeConcepts(raw) {
@@ -1309,8 +1320,8 @@ export function apply(ctx, config) {
     '  "title": "本节标题（无法判断时用「第N部分」）",',
     '  "summary": "1-2 句话概括本节内容",',
     '  "thesis": "本节最核心的观点或论点（一句话）",',
-    '  "arguments": [{"claim": "分论点", "evidence": "支撑的论据或推理", "quote": "原文关键句（可选）"}],',
-    '  "quotes": [{"text": "值得摘录的原文原句", "context": "这句话在论证什么（可选）"}],',
+    '  "arguments": [{"claim": "分论点", "evidence": "支撑的论据或推理", "quote": "原文关键句（可选）", "source": "原文位置（如 第N页/第N段；原文没有位置标记时留空）"}],',
+    '  "quotes": [{"text": "值得摘录的原文原句", "context": "这句话在论证什么（可选）", "source": "原文位置（如 第N页；没有标记时留空）"}],',
     '  "concepts": [{"term": "核心概念/术语", "explanation": "它在文中的含义"}],',
     '  "questions": ["读者应继续追问的批判性问题"]',
     '}',
@@ -1322,6 +1333,7 @@ export function apply(ctx, config) {
       + '请严格只输出一个 JSON 对象（不要输出任何解释、前后缀或 Markdown 代码块），字段如下：\n'
       + SECTION_SCHEMA + '\n'
       + '要求：thesis 必须凝练；arguments 的 claim 是分论点、evidence 是支撑它的论据或推理；quote 尽量引用原文原句；questions 要体现批判性阅读。\n'
+      + '引用溯源：若原文包含【第N页】等位置标记，arguments 与 quotes 的 source 字段必须注明对应页码或段落位置；没有标记则留空。\n'
       + '输出语言：' + lang + '。\n'
     if (focus.trim() !== '') sys += '读者特别关注：' + focus.trim() + '。\n'
     if (depth === 'quick') sys += '模式：快速抓要点——arguments 不超过 3 条，quotes 不超过 3 条，concepts 不超过 4 个，questions 不超过 3 个。'
@@ -1339,10 +1351,11 @@ export function apply(ctx, config) {
     '  "title": "全文标题",',
     '  "summary": "一句话概括全文",',
     '  "thesis": "全文核心论点",',
-    '  "arguments": [{"claim": "分论点", "evidence": "论据", "quote": "原文关键句（可选）"}],',
+    '  "arguments": [{"claim": "分论点", "evidence": "论据", "quote": "原文关键句（可选）", "source": "原文位置（可选）"}],',
     '  "structure": ["论证脉络步骤，按顺序，例如：提出背景→定义问题→反驳旧说→提出新框架"],',
     '  "concepts": [{"term": "概念", "explanation": "含义"}],',
-    '  "questions": ["批判性思考问题"]',
+    '  "questions": ["批判性思考问题"],',
+    '  "citations": [{"claim": "重要论断（简短）", "source": "页码或段落位置（如 第12页；无法定位则留空）", "quote": "支撑该论断的原文关键句"}]',
     '}',
   ].join('\n')
 
@@ -1352,6 +1365,7 @@ export function apply(ctx, config) {
       + '严格只输出一个 JSON 对象（不要输出任何解释或 Markdown 代码块），字段如下：\n'
       + FINAL_SCHEMA + '\n'
       + 'arguments 应提炼 3-8 条最重要的分论点；structure 用短语按顺序描述全文论证脉络。\n'
+      + 'citations 挑选 3-8 条最重要的论断并引用原文关键句；若各部分要点带有 source（页码/段落），必须原样保留到 citations 的 source 字段。\n'
       + '输出语言：' + lang + '。'
   }
 
@@ -1547,6 +1561,173 @@ export function apply(ctx, config) {
     }
   }
 
+  // ---------- 预算预检：token 与耗时估算 ----------
+  // 估算口径（保守）：
+  //   中文 1 字 ≈ 0.6 token；拉丁 1 字符 ≈ 0.25 token；其他 ≈ 0.5 token。
+  //   每次调用固定 prompt 模板开销 ≈ 600 token；输出按各阶段预算计。
+  //   时间 = (输入token + 输出token) / estTokensPerSecond + 调用次数 × estLatencyPerCallMs。
+  const EST_PROMPT_OVERHEAD = 600
+
+  function estimateTokens(text) {
+    let cjk = 0
+    let latin = 0
+    let other = 0
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i)
+      if ((c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3000 && c <= 0x303f) || (c >= 0xff00 && c <= 0xffef)) cjk++
+      else if (c >= 32 && c < 127) latin++
+      else other++
+    }
+    return Math.ceil(cjk * 0.6 + latin * 0.25 + other * 0.5)
+  }
+
+  function estimateCall(calls, inputTokens, outputTokens) {
+    const minutes = (inputTokens + outputTokens) / tune.estTokensPerSecond / 60 + (calls * tune.estLatencyPerCallMs) / 60000
+    return {
+      calls,
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      minutes: Math.round(minutes * 10) / 10,
+      minutesFormula: '（(' + inputTokens + '+' + outputTokens + ') ÷ ' + tune.estTokensPerSecond + ' tok/s + ' + calls + ' 次 × ' + tune.estLatencyPerCallMs + 'ms）',
+    }
+  }
+
+  function buildEstimate(text, depth) {
+    const chars = text.length
+    const effective = text.length > tune.maxInputChars ? text.slice(0, tune.maxInputChars) : text
+    const parts = Math.min(Math.ceil(effective.length / CHUNK_CHARS), MAX_PARTS)
+    const perInput = estimateTokens(effective.length > CHUNK_CHARS ? effective.slice(0, CHUNK_CHARS) : effective) + EST_PROMPT_OVERHEAD
+    const summaryInput = parts * 400 + EST_PROMPT_OVERHEAD
+    const modes = []
+    modes.push({ mode: 'quick', note: '单次调用，输入截断至 30000 字', ...estimateCall(1, estimateTokens(effective.slice(0, 30000)) + EST_PROMPT_OVERHEAD, 2500) })
+    if (effective.length <= 9000) {
+      modes.push({ mode: 'deep', note: '短文单次调用', ...estimateCall(1, estimateTokens(effective) + EST_PROMPT_OVERHEAD, 4000) })
+    } else {
+      modes.push({ mode: 'deep', note: '分 ' + parts + ' 段逐段精读 + 1 次综合', ...estimateCall(parts + 1, parts * perInput + summaryInput, parts * 5000 + 5000) })
+    }
+    const bookParts = Math.max(1, parts)
+    modes.push({ mode: 'book', note: '全书分 ' + bookParts + ' 部分精读并汇总', ...estimateCall(bookParts + 1, bookParts * perInput + summaryInput, bookParts * 5000 + 5000) })
+    if (effective.length <= 9000) {
+      modes.push({ mode: 'map', note: '短文单次知识地图', ...estimateCall(1, estimateTokens(effective) + EST_PROMPT_OVERHEAD, 5000) })
+    } else {
+      modes.push({ mode: 'map', note: '分 ' + parts + ' 段提取 + 1 次汇总', ...estimateCall(parts + 1, parts * perInput + summaryInput, parts * 5000 + 5000) })
+    }
+    const feynmanStruct = effective.length > 9000 ? 1 : 0
+    const structInput = feynmanStruct > 0 ? estimateTokens(effective.slice(0, 5000)) + EST_PROMPT_OVERHEAD : 0
+    modes.push({ mode: 'feynman', note: (feynmanStruct > 0 ? '目录提问 1 次 + ' : '') + '分 ' + Math.max(1, parts) + ' 章 + 合并导图与复习计划 1 次', ...estimateCall(Math.max(1, parts) + feynmanStruct + 1, Math.max(1, parts) * perInput + structInput + summaryInput, Math.max(1, parts) * 5000 + 5000) })
+    return { chars, modes, estTokensPerSecond: tune.estTokensPerSecond, estLatencyPerCallMs: tune.estLatencyPerCallMs }
+  }
+
+  // ---------- 批量精读与跨篇对比 ----------
+  const BATCH_SCHEMA = [
+    '{',
+    '  "title": "对比报告标题（含篇数，如「三篇文章对比：……」）",',
+    '  "comparison": [{"theme": "对比主题（一句话）", "positions": [{"doc": "篇目标题", "view": "该篇在该主题上的立场或要点"}]}],',
+    '  "conflicts": [{"theme": "冲突点", "positions": [{"doc": "篇目标题", "view": "该篇立场"}]}],',
+    '  "complementarity": "各篇如何互补（一句话）",',
+    '  "synthesis": "综合结论（2-4 句话）",',
+    '  "questions": ["跨篇视角下的追问 1-3 条"]',
+    '}',
+  ].join('\n')
+
+  function batchFinalSystem(language) {
+    const lang = language === 'en' ? 'English' : (language === 'zh' ? '简体中文' : '与原文语言保持一致')
+    return '你是跨文档对比分析师。请把多篇文章的要点综合成对比报告。\n'
+      + '严格只输出一个 JSON 对象（不要输出任何解释、前后缀或 Markdown 代码块），结构如下：\n'
+      + BATCH_SCHEMA + '\n'
+      + 'comparison 选 3-6 个最有信息量的对比主题；conflicts 只列真实冲突（没有可留空数组）；synthesis 给出综合结论。\n'
+      + '输出语言：' + lang + '。'
+  }
+
+  function sanitizePositions(raw) {
+    return arr(raw).slice(0, 12).map((p) => {
+      const po = p !== null && typeof p === 'object' ? p : {}
+      return { doc: str(po.doc, ''), view: str(po.view, '') }
+    }).filter((p) => p.doc !== '' || p.view !== '')
+  }
+
+  function sanitizeComparison(raw, cap) {
+    return arr(raw).slice(0, cap).map((c) => {
+      const co = c !== null && typeof c === 'object' ? c : {}
+      return { theme: str(co.theme, ''), positions: sanitizePositions(co.positions) }
+    }).filter((c) => c.theme !== '')
+  }
+
+  async function batchEstimateFlow(args, language) {
+    const items = Array.isArray(args.batch) ? args.batch.slice(0, 10) : []
+    const rows = []
+    let totalChars = 0
+    let totalCalls = 0
+    let totalTokens = 0
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i] !== null && typeof items[i] === 'object' ? items[i] : {}
+      const src = await resolveSource({ url: item.url, path: item.path, text: item.text, refresh: args.refresh === true })
+      let text = String(src.text).replace(/\r\n/g, '\n')
+      if (text.length > tune.maxInputChars) text = text.slice(0, tune.maxInputChars)
+      totalChars += text.length
+      const q = buildEstimate(text, 'quick').modes.find((mm) => mm.mode === 'quick')
+      totalCalls += q.calls
+      totalTokens += q.totalTokens
+      rows.push({ index: i + 1, title: str(item.title, ''), source: str(src.source, ''), chars: text.length, quick: q })
+    }
+    const finalCall = estimateCall(1, items.length * 400 + EST_PROMPT_OVERHEAD, 5000)
+    totalCalls += 1
+    totalTokens += finalCall.totalTokens
+    const totalMinutes = (totalTokens / tune.estTokensPerSecond / 60) + (totalCalls * tune.estLatencyPerCallMs) / 60000
+    return {
+      kind: 'estimate', title: '批量预算预检', summary: items.length + ' 篇文档：逐篇快速提取 + 1 次跨篇对比。', thesis: '',
+      arguments: [], quotes: [], concepts: [], questions: [], structure: [], chapters: [],
+      estimate: {
+        batch: true, items: rows, finalCall,
+        totalCalls, totalTokens, totalMinutes: Math.round(totalMinutes * 10) / 10,
+        estTokensPerSecond: tune.estTokensPerSecond, estLatencyPerCallMs: tune.estLatencyPerCallMs,
+      },
+      meta: { source: items.length + ' 篇文档', sourceKind: 'batch', chars: totalChars, depth: 'batch', durationMs: 0 },
+    }
+  }
+
+  async function batchFlow(args, language) {
+    const started = Date.now()
+    const items = Array.isArray(args.batch) ? args.batch.slice(0, 10) : []
+    const docs = []
+    let totalChars = 0
+    const cfg = await pickConfig()
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i] !== null && typeof items[i] === 'object' ? items[i] : {}
+      const src = await resolveSource({ url: item.url, path: item.path, text: item.text, refresh: args.refresh === true })
+      let text = String(src.text).replace(/\r\n/g, '\n')
+      if (text.length > 30000) text = text.slice(0, 30000)
+      totalChars += text.length
+      const title = str(item.title, '')
+      const parsed = await callModelJson(cfg, sectionSystem('quick', language, str(item.focus, '')), (title !== '' ? '【文档标题：' + title + '】\n' : '') + sectionUser(text, i, items.length), 2500)
+      const s = sanitizeSection(parsed === null ? {} : parsed, title !== '' ? title : ('第 ' + (i + 1) + ' 篇'))
+      docs.push({
+        index: i + 1, title: s.title, summary: s.summary, thesis: s.thesis,
+        arguments: s.arguments, quotes: s.quotes, concepts: s.concepts,
+        source: str(src.source, ''), sourceKind: str(src.sourceKind, 'text'), chars: text.length,
+      })
+    }
+    const compact = docs.map((d) => ({ title: d.title, summary: d.summary, thesis: d.thesis, arguments: d.arguments.slice(0, 3), quotes: d.quotes.slice(0, 3) }))
+    const finalParsed = await callModelJson(cfg, batchFinalSystem(language), '以下 JSON 数组是 ' + docs.length + ' 篇文章各自的要点：\n\n' + JSON.stringify(compact), 5000)
+    const fp = finalParsed !== null && typeof finalParsed === 'object' ? finalParsed : {}
+    return {
+      kind: 'batch',
+      title: str(fp.title, docs.length + ' 篇文章对比'),
+      summary: str(fp.synthesis, ''), thesis: str(fp.synthesis, ''),
+      arguments: [], quotes: [], concepts: [], questions: arr(fp.questions).slice(0, 5).map((x) => String(x)),
+      structure: [], chapters: [], citations: [],
+      items: docs,
+      comparison: {
+        comparison: sanitizeComparison(fp.comparison, 8),
+        conflicts: sanitizeComparison(fp.conflicts, 6),
+        complementarity: str(fp.complementarity, ''),
+        synthesis: str(fp.synthesis, ''),
+      },
+      meta: { source: docs.length + ' 篇文档', sourceKind: 'batch', chars: totalChars, chunks: docs.length, depth: 'batch', durationMs: Date.now() - started },
+    }
+  }
+
   async function computeResult(input) {
     const args = input !== null && typeof input === 'object' ? input : {}
     const started = Date.now()
@@ -1565,6 +1746,16 @@ export function apply(ctx, config) {
     }
     if (text.trim() === '') throw new Error('没有可分析的内容')
     if (text.length > tune.maxInputChars) text = text.slice(0, tune.maxInputChars)
+    const estimate = buildEstimate(text, depth)
+
+    if (args.estimate === true) {
+      return {
+        kind: 'estimate', title: '预算预检', summary: '不调用模型，仅按字数与模式估算 token 与耗时。', thesis: '',
+        arguments: [], quotes: [], concepts: [], questions: [], structure: [], chapters: [],
+        estimate,
+        meta: { ...cacheFields, source, sourceKind, chars: text.length, depth, estimate, durationMs: Date.now() - started },
+      }
+    }
 
     const cfg = await pickConfig()
 
@@ -1576,8 +1767,8 @@ export function apply(ctx, config) {
       return {
         kind: 'article', title: s.title, summary: s.summary, thesis: s.thesis,
         arguments: s.arguments, quotes: s.quotes, concepts: s.concepts, questions: s.questions,
-        structure: [], chapters: [],
-        meta: { ...cacheFields, source, sourceKind, chars: limited.length, chunks: 1, depth: 'quick', durationMs: Date.now() - started },
+        structure: [], chapters: [], citations: [],
+        meta: { ...cacheFields, source, sourceKind, chars: limited.length, chunks: 1, depth: 'quick', estimate, durationMs: Date.now() - started },
       }
     }
 
@@ -1585,7 +1776,7 @@ export function apply(ctx, config) {
       if (text.length <= 9000) {
         const parsed = await callModelJson(cfg, mapSystem(language, focus, false), mapUser(text), 5000)
         if (parsed === null) throw new Error('模型输出无法解析为 JSON，请重试')
-        return sanitizeMap(parsed, [], { ...cacheFields, source, sourceKind, chars: text.length, chunks: 1, depth: 'map', durationMs: Date.now() - started })
+        return sanitizeMap(parsed, [], { ...cacheFields, source, sourceKind, chars: text.length, chunks: 1, depth: 'map', estimate, durationMs: Date.now() - started })
       }
       const chapters = []
       let parts = splitChunks(text, CHUNK_CHARS)
@@ -1598,7 +1789,7 @@ export function apply(ctx, config) {
       const condensed = chapters.map((c) => ({ title: c.title, summary: c.summary, thesis: c.thesis, arguments: c.arguments.slice(0, 3) }))
       const finalParsed = await callModelJson(cfg, mapSystem(language, focus, true), mapFinalUser(condensed, text.length), 5000)
       if (finalParsed === null) throw new Error('模型输出无法解析为 JSON，请重试')
-      return sanitizeMap(finalParsed, chapters, { ...cacheFields, source, sourceKind, chars: text.length, chunks: chapters.length, depth: 'map', durationMs: Date.now() - started })
+      return sanitizeMap(finalParsed, chapters, { ...cacheFields, source, sourceKind, chars: text.length, chunks: chapters.length, depth: 'map', estimate, durationMs: Date.now() - started })
     }
 
     if (depth === 'feynman') {
@@ -1644,7 +1835,7 @@ export function apply(ctx, config) {
         concepts: [],
         structure: [],
         chapters: [],
-        meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: feynmanChapters.length, depth: 'feynman', durationMs: Date.now() - started },
+        meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: feynmanChapters.length, depth: 'feynman', estimate, durationMs: Date.now() - started },
       }
     }
 
@@ -1675,8 +1866,8 @@ export function apply(ctx, config) {
           kind: depth === 'book' ? 'book' : 'article',
           title: first.title, summary: first.summary, thesis: first.thesis,
           arguments: first.arguments, quotes: first.quotes, concepts: [], questions: [],
-          structure: [], chapters,
-          meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: chapters.length, depth, durationMs: Date.now() - started, note: (typeof src.note === 'string' && src.note !== '' ? src.note + '；' : '') + '综合阶段输出解析失败，已回退为各部分要点' },
+          structure: [], chapters, citations: [],
+          meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: chapters.length, depth, estimate, durationMs: Date.now() - started, note: (typeof src.note === 'string' && src.note !== '' ? src.note + '；' : '') + '综合阶段输出解析失败，已回退为各部分要点' },
         }
       }
       throw new Error('模型输出无法解析为 JSON，请重试')
@@ -1684,12 +1875,13 @@ export function apply(ctx, config) {
 
     const fin = sanitizeSection(finalParsed, chapters.length > 0 ? chapters[0].title : '未命名内容')
     const structure = arr(finalParsed.structure).slice(0, 12).map((x) => String(x).trim()).filter((x) => x !== '')
+    const citations = sanitizeCitations(finalParsed.citations)
     return {
       kind: depth === 'book' ? 'book' : 'article',
       title: fin.title, summary: fin.summary, thesis: fin.thesis,
       arguments: fin.arguments, quotes: fin.quotes, concepts: fin.concepts, questions: fin.questions,
-      structure, chapters,
-      meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: chunked ? chapters.length : 1, depth, durationMs: Date.now() - started },
+      structure, chapters, citations,
+      meta: { ...cacheFields, source, sourceKind, chars: text.length, chunks: chunked ? chapters.length : 1, depth, estimate, durationMs: Date.now() - started },
     }
   }
 
@@ -1798,9 +1990,87 @@ export function apply(ctx, config) {
     return lines.join('\n')
   }
 
+  function renderEstimateMarkdown(v) {
+    const est = v.estimate !== null && typeof v.estimate === 'object' ? v.estimate : {}
+    const lines = ['# 🧮 预算预检：' + str(v.meta !== null && typeof v.meta === 'object' ? v.meta.source : '', '内容')]
+    const tps = typeof est.estTokensPerSecond === 'number' ? est.estTokensPerSecond : 30
+    const lat = typeof est.estLatencyPerCallMs === 'number' ? est.estLatencyPerCallMs : 800
+    if (est.batch === true) {
+      lines.push('', '**口径**：中文≈0.6 token/字，拉丁≈0.25 token/字符；时间=(总token÷' + tps + ' tok/s)+(调用次数×' + lat + 'ms)。', '')
+      const rows = arr(est.items)
+      rows.forEach((r) => {
+        const ro = r !== null && typeof r === 'object' ? r : {}
+        const q = ro.quick !== null && typeof ro.quick === 'object' ? ro.quick : {}
+        lines.push('- **' + (typeof ro.index === 'number' ? '#' + ro.index + ' ' : '') + str(ro.title, '未命名') + '**（' + (typeof ro.chars === 'number' ? ro.chars : 0) + ' 字）· 1 次调用 · 约 ' + (typeof q.totalTokens === 'number' ? q.totalTokens : 0) + ' token · 约 ' + (typeof q.minutes === 'number' ? q.minutes : 0) + ' 分钟')
+      })
+      lines.push('- **跨篇对比**（1 次）· 约 ' + (est.finalCall !== null && typeof est.finalCall === 'object' && typeof est.finalCall.totalTokens === 'number' ? est.finalCall.totalTokens : 0) + ' token')
+      lines.push('', '**合计**：' + (typeof est.totalCalls === 'number' ? est.totalCalls : 0) + ' 次调用 · 约 ' + (typeof est.totalTokens === 'number' ? est.totalTokens : 0) + ' token · 预计 ' + (typeof est.totalMinutes === 'number' ? est.totalMinutes : 0) + ' 分钟')
+    } else {
+      lines.push('', '**口径**：中文≈0.6 token/字，拉丁≈0.25 token/字符；输出按各阶段预算计；时间=(总token÷' + tps + ' tok/s)+(调用次数×' + lat + 'ms)。', '', '| 模式 | 调用次数 | 输入 token | 输出 token | 总 token | 预计耗时 | 说明 |', '| --- | --- | --- | --- | --- | --- | --- |')
+      const modes = arr(est.modes)
+      modes.forEach((mm) => {
+        const mo = mm !== null && typeof mm === 'object' ? mm : {}
+        lines.push('| ' + str(mo.mode, '') + ' | ' + (typeof mo.calls === 'number' ? mo.calls : 0) + ' | ' + (typeof mo.inputTokens === 'number' ? mo.inputTokens : 0) + ' | ' + (typeof mo.outputTokens === 'number' ? mo.outputTokens : 0) + ' | ' + (typeof mo.totalTokens === 'number' ? mo.totalTokens : 0) + ' | ' + (typeof mo.minutes === 'number' ? '≈ ' + mo.minutes + ' 分钟' : '') + ' | ' + str(mo.note, '') + ' |')
+      })
+      if (typeof est.chars === 'number') lines.push('', '输入字数：' + est.chars + '（超过 ' + tune.maxInputChars + ' 会被截断）')
+      lines.push('', '> 估算基于本地字数启发式与默认速率/延迟，实际取决于模型速度、负载与网络。')
+    }
+    return lines.join('\n')
+  }
+
+  function renderBatchMarkdown(v) {
+    const lines = ['# 🔀 跨篇对比：' + str(v.title, '批量精读')]
+    if (str(v.summary, '') !== '') lines.push('', '**综合结论**：' + v.summary)
+    const items = arr(v.items)
+    if (items.length > 0) {
+      lines.push('', '## 各篇速览')
+      items.forEach((it) => {
+        const io = it !== null && typeof it === 'object' ? it : {}
+        lines.push('', '### ' + (typeof io.index === 'number' ? io.index + '. ' : '') + str(io.title, '未命名') + (typeof io.chars === 'number' ? '（' + io.chars + ' 字）' : ''))
+        if (str(io.thesis, '') !== '') lines.push('- 核心论点：' + io.thesis)
+        if (str(io.summary, '') !== '') lines.push('- 摘要：' + io.summary)
+      })
+    }
+    const cmp = v.comparison !== null && typeof v.comparison === 'object' ? v.comparison : {}
+    const themes = arr(cmp.comparison)
+    if (themes.length > 0) {
+      lines.push('', '## 对比矩阵')
+      themes.forEach((c, i) => {
+        const co = c !== null && typeof c === 'object' ? c : {}
+        lines.push('', '### ' + (i + 1) + '. ' + str(co.theme, ''))
+        arr(co.positions).forEach((p) => {
+          const po = p !== null && typeof p === 'object' ? p : {}
+          lines.push('- **' + str(po.doc, '') + '**：' + str(po.view, ''))
+        })
+      })
+    }
+    const conflicts = arr(cmp.conflicts)
+    if (conflicts.length > 0) {
+      lines.push('', '## 冲突点')
+      conflicts.forEach((c, i) => {
+        const co = c !== null && typeof c === 'object' ? c : {}
+        lines.push('', '### ' + (i + 1) + '. ' + str(co.theme, ''))
+        arr(co.positions).forEach((p) => {
+          const po = p !== null && typeof p === 'object' ? p : {}
+          lines.push('- **' + str(po.doc, '') + '**：' + str(po.view, ''))
+        })
+      })
+    }
+    if (str(cmp.complementarity, '') !== '') lines.push('', '## 互补关系', cmp.complementarity)
+    const qs = sanitizeQuestions(v.questions)
+    if (qs.length > 0) {
+      lines.push('', '## 跨篇追问')
+      qs.forEach((q, i) => lines.push((i + 1) + '. ' + q))
+    }
+    lines.push('', '---', '', metaFooter(v.meta !== null && typeof v.meta === 'object' ? v.meta : {}))
+    return lines.join('\n')
+  }
+
   function renderMarkdown(v) {
     if (v.kind === 'map') return renderMapMarkdown(v)
     if (v.kind === 'feynman') return renderFeynmanMarkdown(v)
+    if (v.kind === 'estimate') return renderEstimateMarkdown(v)
+    if (v.kind === 'batch') return renderBatchMarkdown(v)
     const lines = ['# 📖 精读报告：' + str(v.title, '未命名')]
     if (str(v.summary, '') !== '') lines.push('', '**一句话总结**：' + v.summary)
     if (str(v.thesis, '') !== '') lines.push('', '**核心论点**：' + v.thesis)
@@ -1817,7 +2087,14 @@ export function apply(ctx, config) {
     const qts = sanitizeQuotes(v.quotes)
     if (qts.length > 0) {
       lines.push('', '**金句摘录**：')
-      qts.forEach((q) => lines.push('- “' + q.text + '”'))
+      qts.forEach((q) => lines.push('- “' + q.text + '”' + (q.source !== '' ? '（' + q.source + '）' : '')))
+    }
+    const cits = sanitizeCitations(v.citations)
+    if (cits.length > 0) {
+      lines.push('', '**引用溯源**：')
+      cits.forEach((c, i) => {
+        lines.push((i + 1) + '. ' + c.claim + (c.source !== '' ? ' — 位置：' + c.source : '') + (c.quote !== '' ? ' — 原文：“' + c.quote + '”' : ''))
+      })
     }
     if (arr(v.chapters).length > 0) {
       lines.push('', '**各部分脉络**：')
@@ -2193,14 +2470,18 @@ export function apply(ctx, config) {
   async function analyze(input) {
     const args = input !== null && typeof input === 'object' ? input : {}
     const exportFmt = args.export === 'md' || args.export === 'mm' || args.export === 'html' || args.export === 'all' ? args.export : 'none'
-    const result = await computeResult(input)
+    const language = args.language === 'en' ? 'en' : (args.language === 'zh' ? 'zh' : 'auto')
+    const isBatch = Array.isArray(args.batch) && args.batch.length >= 2
+    const result = isBatch
+      ? (args.estimate === true ? await batchEstimateFlow(args, language) : await batchFlow(args, language))
+      : await computeResult(input)
     await attachExports(result, exportFmt)
     return result
   }
 
   const tool = defineTool({
     name: 'deepread',
-    description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。五种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；feynman=费曼读书法（浏览目录→提出问题→分章阅读→提取观点数据证据→章节导图→合上书讲解→自检知识缺口→回原文修正→合并全书导图→再讲一次→间隔复习计划）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）。知乎/掘金等反爬站点请粘贴正文。同一链接抓取过的全文会写入本地缓存（默认 7 天），换模式重读同一篇文章不再重新联网抓取；refresh=true 可强制重新抓取。',
+    description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。五种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；feynman=费曼读书法（浏览目录→提出问题→分章阅读→提取观点数据证据→章节导图→合上书讲解→自检知识缺口→回原文修正→合并全书导图→再讲一次→间隔复习计划）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）、batch（2-10 篇批量精读+跨篇对比）。报告含引用溯源（页码/段落定位）。estimate=true 可先做预算预检（预计 token 与耗时，不调用模型）。知乎/掘金等反爬站点请粘贴正文。同一链接抓取过的全文会写入本地缓存（默认 7 天），换模式重读同一篇文章不再重新联网抓取；refresh=true 可强制重新抓取。',
     timeoutMs: tune.timeoutMs,
     parameters: {
       url: { type: 'string', description: '要精读的网页链接。仅支持微信公众号（mp.weixin.qq.com）的稳定链接；知乎/掘金等有反爬的站点不支持，请粘贴正文。与 path/text 至少提供一个。' },
@@ -2211,6 +2492,8 @@ export function apply(ctx, config) {
       refresh: { type: 'boolean', default: false, description: '强制重新抓取并刷新缓存（默认 false：同一链接命中缓存时直接复用已抓取的全文，不再联网）。' },
       focus: { type: 'string', description: '读者特别关注的角度，例如"论证逻辑""研究方法""与既有理论的关系"。' },
       language: { type: 'string', enum: ['zh', 'en', 'auto'], default: 'auto', description: '报告输出语言，默认 auto（跟随原文）。' },
+      estimate: { type: 'boolean', default: false, description: '预算预检：true 时不调用模型，只返回各模式的预计调用次数、输入/输出 token 与耗时（按字数估算：中文≈0.6 token/字，拉丁≈0.25 token/字符，输出按各阶段预算计；时间=(总token÷速率)+(调用次数×单次延迟)，速率与延迟可用 Config 调整）。' },
+      batch: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { title: { type: 'string', description: '文档标题（可选，对比报告中用于标识）' }, url: { type: 'string' }, path: { type: 'string' }, text: { type: 'string' }, focus: { type: 'string' } } }, description: '批量精读 2-10 篇并输出跨篇对比报告（对比主题矩阵、冲突点、互补关系与综合结论）。每篇需提供 url/path/text 之一；与 url/path/text 互斥。' },
     },
     output: {
       schema: {
@@ -2234,12 +2517,16 @@ export function apply(ctx, config) {
           bookMap: { type: 'string' },
           finalExplanation: { type: 'string' },
           reviewPlan: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { interval: { type: 'string' }, focus: { type: 'string' }, method: { type: 'string' } } } },
-          arguments: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { claim: { type: 'string' }, evidence: { type: 'string' }, quote: { type: 'string' } } } },
-          quotes: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { text: { type: 'string' }, context: { type: 'string' } } } },
+          arguments: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { claim: { type: 'string' }, evidence: { type: 'string' }, quote: { type: 'string' }, source: { type: 'string' } } } },
+          quotes: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { text: { type: 'string' }, context: { type: 'string' }, source: { type: 'string' } } } },
           concepts: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { term: { type: 'string' }, explanation: { type: 'string' } } } },
           questions: { type: 'array', items: { type: 'string' } },
           structure: { type: 'array', items: { type: 'string' } },
           chapters: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { title: { type: 'string' }, summary: { type: 'string' }, thesis: { type: 'string' }, arguments: { type: 'array' }, quotes: { type: 'array' } } } },
+          citations: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { claim: { type: 'string' }, source: { type: 'string' }, quote: { type: 'string' } } } },
+          estimate: { type: 'object', additionalProperties: true },
+          items: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          comparison: { type: 'object', additionalProperties: true },
           meta: { type: 'object', additionalProperties: true, properties: { source: { type: 'string' }, sourceKind: { type: 'string' }, chars: { type: 'number' }, chunks: { type: 'number' }, depth: { type: 'string' }, durationMs: { type: 'number' }, note: { type: 'string' }, files: { type: 'object', additionalProperties: true, properties: { md: { type: 'string' }, mm: { type: 'string' }, html: { type: 'string' } } } } },
         },
       },
