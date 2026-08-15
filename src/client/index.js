@@ -34,6 +34,8 @@ const React = require("react")
       '.dr-note { color: var(--dsw-alias-label-secondary); font-size: 12px; margin-top: 6px; }',
       '.dr-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; margin-top: 6px; }',
       '.dr-budget { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.5; }',
+      '.dr-budget-result { color: var(--dsw-alias-label-primary); font-weight: 600; }',
+      '.dr-budget-error { color: var(--dsw-alias-state-error-primary); }',
       '.dr-job-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; padding: 4px 8px; margin: 4px 0; word-break: break-all; overflow-wrap: anywhere; }',
       '.dr-map-item { border-left: 2px solid var(--dsw-alias-border-l2); padding-left: 8px; margin: 8px 0; }',
       '.dr-map-claim { font-weight: 600; color: var(--dsw-alias-label-primary); }',
@@ -75,6 +77,7 @@ const React = require("react")
       '.dr-submit:disabled { opacity: 0.6; cursor: default; }',
       '.dr-preflight { background: none; border: 1px solid var(--dsw-alias-border-l1); color: var(--dsw-alias-label-primary); border-radius: 8px; padding: 7px 12px; cursor: pointer; font-size: 13px; }',
       '.dr-preflight:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }',
+      '.dr-preflight:disabled { opacity: 0.6; cursor: default; }',
       '.dr-history { display: flex; flex-direction: column; gap: 4px; }',
       '.dr-history-empty { color: var(--dsw-alias-label-secondary); font-size: 12px; padding: 4px 0; }',
       '.dr-history-item { border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); overflow: hidden; }',
@@ -620,6 +623,8 @@ const React = require("react")
       const [error, setError] = React.useState(null)
       const [note, setNote] = React.useState(null)
       const [history, setHistory] = React.useState([])
+      // 预算预检结果：{ status: 'idle'|'loading'|'done'|'error', line, data }；面板内直接展示，不跳对话。
+      const [budget, setBudget] = React.useState(null)
       const panelRef = React.useRef(null)
 
       React.useEffect(() => {
@@ -663,15 +668,38 @@ const React = require("react")
         setOpen(false)
       }
 
-      // 预算预检：提交 estimate=true 的指令，不关面板，结果出现在上方对话里。
-      const preflightBudget = () => {
+      // 预算预检：POST 同源 API（/api/deepread/budget）由 Host 直接抓取/读取来源并估算，
+      // 面板内显示一行结论（不跳对话、不渲染表格）。粘贴文本仍走本地实时估算。
+      const preflightBudget = async () => {
         const built = buildTarget()
         if (built.error !== undefined) { setError(built.error); return }
-        const instruction = '请使用 deepread 工具对以下内容做预算预检（estimate=true，不要调用模型做精读，只需展示预算结果表格）：\n' + built.target
-        const failure = submitDeepread(instruction)
-        if (failure !== null) { setError(failure); return }
+        setBudget({ status: 'loading', line: '预算计算中…', data: null })
         setError(null)
-        setNote('🔍 预算预检已提交，预算表结果见上方对话；确认后可点「开始精读」')
+        setNote(null)
+        try {
+          const res = await fetch('/api/deepread/budget', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ url: url.trim(), path: path.trim(), text: text.trim() }),
+          })
+          let data = null
+          try {
+            data = await res.json()
+          } catch (err) {
+            data = null
+          }
+          if (!res.ok || data === null || typeof data !== 'object') {
+            setBudget({ status: 'error', line: '预算预检失败：HTTP ' + res.status, data: null })
+            return
+          }
+          if (data.ok !== true) {
+            setBudget({ status: 'error', line: typeof data.error === 'string' && data.error !== '' ? data.error : '预算预检失败', data: null })
+            return
+          }
+          setBudget({ status: 'done', line: '', data })
+        } catch (err) {
+          setBudget({ status: 'error', line: '预算预检失败：' + (err !== null && typeof err === 'object' && typeof err.message === 'string' ? err.message : String(err)), data: null })
+        }
       }
 
       const depthOption = (value) => {
@@ -701,6 +729,7 @@ const React = require("react")
       }
 
       // 预算汇总：文本输入非空时实时计算；仅链接/路径时提示开始后计算；全空时提示输入内容。
+      // 点击「预算预检」后（budget done）按当前深度动态取 Host 返回的对应模式行。
       const calib = readCalibration()
       const hasText = text.trim() !== ''
       const hasTarget = url.trim() !== '' || path.trim() !== ''
@@ -710,6 +739,26 @@ const React = require("react")
         budgetLine = '预算：' + formatTokens(budgetModes[depth].totalTokens) + ' · ' + formatMinutes(budgetModes[depth].minutes)
       } else if (hasTarget) {
         budgetLine = '预算：链接/文件点「预算预检」立即查看'
+      }
+      const budgetState = budget !== null ? budget.status : 'idle'
+      let displayLine = budgetLine
+      let budgetCls = 'dr-budget'
+      if (budgetState === 'loading') {
+        displayLine = budget.line
+      } else if (budgetState === 'error') {
+        displayLine = budget.line
+        budgetCls += ' dr-budget-error'
+      } else if (budgetState === 'done' && budget !== null && budget.data !== null && typeof budget.data === 'object') {
+        const d = budget.data
+        const modes = Array.isArray(d.modes) ? d.modes : []
+        const row = modes.find((m) => m !== null && typeof m === 'object' && m.mode === depth) || null
+        const chars = typeof d.chars === 'number' ? d.chars : 0
+        if (row !== null && typeof row.totalTokens === 'number') {
+          displayLine = '预算：约 ' + chars + ' 字 · ' + formatTokens(row.totalTokens) + ' · ' + formatMinutes(row.minutes)
+        } else {
+          displayLine = '预算：约 ' + chars + ' 字（结果解析失败）'
+        }
+        budgetCls += ' dr-budget-result'
       }
 
       return React.createElement('div', { className: 'dr-panel', ref: panelRef },
@@ -742,7 +791,7 @@ const React = require("react")
             history.map((item, i) => React.createElement(HistoryItem, { item: item, onReread: reread, key: 'h-' + i })),
           ),
         ),
-        React.createElement('div', { className: 'dr-budget' }, budgetLine),
+        React.createElement('div', { className: budgetCls }, displayLine),
         React.createElement('div', { className: 'dr-row' },
           React.createElement('span', { className: 'dr-label' }, '深度'),
           depthOption('quick'),
@@ -767,7 +816,7 @@ const React = require("react")
         }),
         React.createElement('div', { className: 'dr-row' },
           React.createElement('button', { type: 'button', className: 'dr-submit', onClick: submit }, '开始精读'),
-          React.createElement('button', { type: 'button', className: 'dr-preflight', onClick: preflightBudget }, '🔍 预算预检'),
+          React.createElement('button', { type: 'button', className: 'dr-preflight', onClick: preflightBudget, disabled: budgetState === 'loading' }, '🔍 预算预检'),
         ),
         error !== null ? React.createElement('div', { className: 'dr-error' }, String(error)) : null,
         note !== null ? React.createElement('div', { className: 'dr-note' }, String(note)) : null,

@@ -2967,4 +2967,98 @@ export function apply(ctx, config) {
   tool.__collectPageNums = collectPageNums
 
   ctx.effect(() => ctx.tools.register(tool))
+
+  // ---------- 面板直调 API：POST /api/deepread/budget ----------
+  // 精读面板「预算预检」按钮经同源 HTTP 调用本路由：Host 直接抓取/读取来源并估算，
+  // 面板内显示一行结论，不再把指令发进对话。复用 resolveForEstimate（微信抓取/缓存/
+  // 反爬回退/PDF 采样外推）与 buildEstimate（与模型工具同源），返回 lossless JSON。
+  const webServer = ctx.get('webServer')
+  if (webServer !== undefined && typeof webServer.register === 'function') {
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/api/deepread/budget',
+      handler: async (req, res) => {
+        const send = (payload) => {
+          if (res.headersSent) return
+          res.setHeader('content-type', 'application/json; charset=utf-8')
+          res.end(JSON.stringify(payload))
+        }
+        try {
+          if (typeof req.method !== 'string' || req.method.toUpperCase() !== 'POST') {
+            res.statusCode = 405
+            return send({ ok: false, error: '仅支持 POST' })
+          }
+          const body = await readJsonBody(req)
+          const args = body !== null && typeof body === 'object' ? body : {}
+          const url = typeof args.url === 'string' ? args.url.trim() : ''
+          const path = typeof args.path === 'string' ? args.path.trim() : ''
+          const text = typeof args.text === 'string' ? args.text : ''
+          if (url === '' && path === '' && text.trim() === '') {
+            return send({ ok: false, error: '请提供 url、path 或 text（至少其一）' })
+          }
+          await loadCalibration()
+          const src = await resolveForEstimate({ url, path, text })
+          let estimate
+          let chars
+          const pdfStats = src.pdfStats !== undefined && src.pdfStats !== null ? src.pdfStats : null
+          if (pdfStats !== null) {
+            const sampleChars = typeof pdfStats.sampleChars === 'number' ? pdfStats.sampleChars : 0
+            const samplePages = typeof pdfStats.samplePages === 'number' && pdfStats.samplePages > 0 ? pdfStats.samplePages : 2
+            const pages = typeof pdfStats.pages === 'number' ? pdfStats.pages : 1
+            const fullChars = Math.max(1, Math.round((sampleChars / samplePages) * pages))
+            const sampleTokens = typeof pdfStats.sampleTokens === 'number' ? pdfStats.sampleTokens : 0
+            const tokensPerChar = sampleChars > 0 && sampleTokens > 0 ? sampleTokens / sampleChars : 0.6
+            estimate = buildEstimate('', 'deep', { chars: fullChars, tokensPerChar })
+            chars = fullChars
+          } else {
+            estimate = buildEstimate(src.text, 'deep')
+            chars = src.text.length
+          }
+          const payload = {
+            ok: true,
+            chars,
+            source: src.source,
+            sourceKind: src.sourceKind,
+            ...(typeof src.note === 'string' && src.note !== '' ? { note: src.note } : {}),
+            ...(typeof src.cache === 'string' ? { cache: src.cache } : {}),
+            modes: estimate.modes,
+            estTokensPerSecond: estimate.estTokensPerSecond,
+            estLatencyPerCallMs: estimate.estLatencyPerCallMs,
+            calibrated: estimate.calibrated === true,
+          }
+          return send(payload)
+        } catch (err) {
+          res.statusCode = 500
+          return send({ ok: false, error: err !== null && typeof err === 'object' && typeof err.message === 'string' ? err.message : String(err) })
+        }
+      },
+    }))
+  }
+}
+
+// ---------- HTTP 请求体解析（面板直调 API 用） ----------
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let size = 0
+    req.on('data', (chunk) => {
+      size += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+      if (size > 5 * 1024 * 1024) {
+        reject(new Error('请求体过大（超过 5MB）'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks.map((c) => (typeof c === 'string' ? Buffer.from(c, 'utf-8') : c))).toString('utf-8')
+      if (raw.trim() === '') return resolve({})
+      try {
+        resolve(JSON.parse(raw))
+      } catch (err) {
+        reject(new Error('请求体不是合法 JSON'))
+      }
+    })
+    req.on('error', reject)
+  })
 }

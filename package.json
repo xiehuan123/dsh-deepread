@@ -1,7 +1,7 @@
 {
   "name": "dsh-deepread",
   "description": "AI deep-reading assistant: extract core claims, argument structure, and key evidence from books and articles. Five modes (quick, deep, knowledge map, Feynman, full book); knowledge-map reports include confidence levels, data facts, relation labels, Mermaid mindmaps, and recall questions. Reads WeChat article URLs, TXT/Markdown/HTML/PDF files, or pasted text (built-in pure-JS PDF extractor). Exports Markdown, FreeMind/XMind mindmaps, and HTML reports. DeepSeek Harness plugin.",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "license": "MIT",
   "type": "module",
   "main": "./index.mjs",
@@ -17,7 +17,7 @@
   "scripts": {
     "build:client": "node scripts/build-client.mjs",
     "prepack": "node scripts/build-client.mjs",
-    "test": "node test/smoke.mjs && node test/client-bundle.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs && node test/features.mjs && node test/pdf-stats.mjs && node test/calibration.mjs && node test/jobs-progress.mjs"
+    "test": "node test/smoke.mjs && node test/client-bundle.mjs && node test/budget-api.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs && node test/features.mjs && node test/pdf-stats.mjs && node test/calibration.mjs && node test/jobs-progress.mjs"
   },
   "dsh": {
     "bundle": {
