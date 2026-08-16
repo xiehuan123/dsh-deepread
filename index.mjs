@@ -12,8 +12,9 @@ export const Config = Schema.object({
   maxInputChars: Schema.number().default(400000),
   cacheEnabled: Schema.boolean().default(true),
   cacheTtlHours: Schema.number().default(168),
-  estTokensPerSecond: Schema.number().default(30),
-  estLatencyPerCallMs: Schema.number().default(800),
+  // 0 = 未显式配置：估算自动按当前模型族默认速率（仅当尚无运行时实测校准时）；>0 显式覆盖。
+  estTokensPerSecond: Schema.number().default(0),
+  estLatencyPerCallMs: Schema.number().default(0),
   backgroundMinChars: Schema.number().default(9000),
 })
 
@@ -61,8 +62,8 @@ export function apply(ctx, config) {
     maxInputChars: num(cfg.maxInputChars, 400000),
     cacheEnabled: typeof cfg.cacheEnabled === 'boolean' ? cfg.cacheEnabled : true,
     cacheTtlHours: typeof cfg.cacheTtlHours === 'number' && Number.isFinite(cfg.cacheTtlHours) && cfg.cacheTtlHours >= 0 ? cfg.cacheTtlHours : 168,
-    estTokensPerSecond: num(cfg.estTokensPerSecond, 30),
-    estLatencyPerCallMs: num(cfg.estLatencyPerCallMs, 800),
+    estTokensPerSecond: num(cfg.estTokensPerSecond, 0),
+    estLatencyPerCallMs: num(cfg.estLatencyPerCallMs, 0),
     backgroundMinChars: num(cfg.backgroundMinChars, 9000),
   }
   const CACHE_TTL_MS = tune.cacheTtlHours * 3600 * 1000
@@ -89,14 +90,42 @@ export function apply(ctx, config) {
     return typeof calibration.latencyMs === 'number' && Number.isFinite(calibration.latencyMs) && calibration.latencyMs > 0 ? calibration.latencyMs : null
   }
 
+  // 冷启动默认速率：无实测校准、且用户未显式配置时，按当前所选模型族给基准值。
+  // 运行时每次成功调用都会实测 tok/s 并指数加权覆盖（recordCalibration），默认值只在冷启动起作用。
+  const MODEL_RATE_DEFAULTS = [
+    { match: /deepseek/, rate: 100, latency: 700 },
+    { match: /kimi|moonshot/, rate: 110, latency: 700 },
+    { match: /glm|chatglm/, rate: 100, latency: 700 },
+    { match: /qwen/, rate: 110, latency: 700 },
+    { match: /doubao|seed/, rate: 90, latency: 800 },
+    { match: /claude|anthropic/, rate: 70, latency: 900 },
+    { match: /gemini/, rate: 80, latency: 800 },
+    { match: /gpt|openai/, rate: 90, latency: 800 },
+  ]
+  const DEFAULT_RATE_TOK_PER_SEC = 100
+  const DEFAULT_LATENCY_MS = 800
+
+  function modelRateDefaults() {
+    const sel = selectedModel()
+    const id = sel !== null && typeof sel.model === 'string' ? sel.model.toLowerCase() : ''
+    for (const d of MODEL_RATE_DEFAULTS) {
+      if (d.match.test(id)) return { rate: d.rate, latency: d.latency }
+    }
+    return { rate: DEFAULT_RATE_TOK_PER_SEC, latency: DEFAULT_LATENCY_MS }
+  }
+
   function effectiveRate() {
     const r = calibratedRate()
-    return r !== null ? r : tune.estTokensPerSecond
+    if (r !== null) return r
+    if (tune.estTokensPerSecond > 0) return tune.estTokensPerSecond
+    return modelRateDefaults().rate
   }
 
   function effectiveLatency() {
     const l = calibratedLatency()
-    return l !== null ? l : tune.estLatencyPerCallMs
+    if (l !== null) return l
+    if (tune.estLatencyPerCallMs > 0) return tune.estLatencyPerCallMs
+    return modelRateDefaults().latency
   }
 
   let statsTablePromise = null
@@ -1098,7 +1127,7 @@ export function apply(ctx, config) {
   }
 
   // 对给定页对象编号逐页提取纯文本（共享：extractPdfText 与 extractPdfStats 复用）。
-  function extractPageTexts(pageNums, getObject, resolveRef, resolveMultiRef) {
+  function extractPageTexts(pageNums, getObject, resolveRef, resolveMultiRef, onPage) {
     const fontMaps = {}
     function getFontMap(fontRef) {
       if (!fontRef) return null
@@ -1189,14 +1218,17 @@ export function apply(ctx, config) {
         }
       }
       pageTexts.push(pageText.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim())
+      if (onPage !== null && typeof onPage === 'function') onPage({ done: pageTexts.length, total: pageNums.length })
     }
     return pageTexts
   }
 
-  function extractPdfText(latin1) {
+  function extractPdfText(latin1, onPage) {
     if (latin1.slice(0, 5) !== '%PDF-') throw new Error('不是有效的 PDF 文件')
     const state = collectPageNums(latin1)
-    const pageTexts = extractPageTexts(state.pageNums, state.getObject, state.resolveRef, state.resolveMultiRef)
+    const pageCb = typeof onPage === 'function' ? onPage : null
+    if (pageCb !== null) pageCb({ total: state.pageNums.length, done: 0 })
+    const pageTexts = extractPageTexts(state.pageNums, state.getObject, state.resolveRef, state.resolveMultiRef, pageCb)
     const pages = pageTexts.filter((t) => t.trim() !== '')
     return pages.map((t, i) => '【第' + (i + 1) + '页】\n' + t).join('\n\n')
   }
@@ -1355,6 +1387,7 @@ export function apply(ctx, config) {
 
   async function resolveSource(args, opts) {
     const opt = opts !== null && typeof opts === 'object' ? opts : {}
+    const onProgress = typeof opt.onProgress === 'function' ? opt.onProgress : null
     const url = typeof args.url === 'string' ? args.url.trim() : ''
     const path = typeof args.path === 'string' ? args.path.trim() : ''
     const text = typeof args.text === 'string' ? args.text : ''
@@ -1408,7 +1441,19 @@ export function apply(ctx, config) {
         }
         let extracted = ''
         try {
-          extracted = extractPdfText(latin)
+          let lastPct = -1
+          extracted = extractPdfText(latin, onProgress === null ? undefined : (info) => {
+            if (info.done === 0) {
+              onProgress('解析 PDF 中…（共 ' + info.total + ' 页）')
+              return
+            }
+            const total = Math.max(1, info.total)
+            const pct = Math.round((info.done / total) * 100)
+            if (info.done >= total || pct >= lastPct + 5) {
+              lastPct = pct
+              onProgress('解析 PDF 中… ' + pct + '%（' + info.done + '/' + total + ' 页）')
+            }
+          })
         } catch (error) {
           throw new Error('PDF 解析失败：' + (error !== null && typeof error === 'object' && error.message ? error.message : String(error)))
         }
@@ -1873,19 +1918,22 @@ export function apply(ctx, config) {
     }
   }
 
-  async function batchFlow(args, language, signal) {
+  async function batchFlow(args, language, signal, onProgress) {
     const started = Date.now()
     const items = Array.isArray(args.batch) ? args.batch.slice(0, 10) : []
     const docs = []
     let totalChars = 0
     const cfg = await pickConfig()
+    const progress = typeof onProgress === 'function' ? onProgress : null
     for (let i = 0; i < items.length; i++) {
       const item = items[i] !== null && typeof items[i] === 'object' ? items[i] : {}
-      const src = await resolveSource({ url: item.url, path: item.path, text: item.text, refresh: args.refresh === true })
+      if (progress !== null) progress('解析第 ' + (i + 1) + '/' + items.length + ' 篇…')
+      const src = await resolveSource({ url: item.url, path: item.path, text: item.text, refresh: args.refresh === true }, { onProgress: progress === null ? undefined : (line) => progress('第 ' + (i + 1) + ' 篇 · ' + line) })
       let text = String(src.text).replace(/\r\n/g, '\n')
       if (text.length > 30000) text = text.slice(0, 30000)
       totalChars += text.length
       const title = str(item.title, '')
+      if (progress !== null) progress('精读第 ' + (i + 1) + '/' + items.length + ' 篇…')
       const parsed = await callModelJson(cfg, sectionSystem('quick', language, str(item.focus, '')), (title !== '' ? '【文档标题：' + title + '】\n' : '') + sectionUser(text, i, items.length), 2500, signal)
       const s = sanitizeSection(parsed === null ? {} : parsed, title !== '' ? title : ('第 ' + (i + 1) + ' 篇'))
       docs.push({
@@ -1893,8 +1941,10 @@ export function apply(ctx, config) {
         arguments: s.arguments, quotes: s.quotes, concepts: s.concepts,
         source: str(src.source, ''), sourceKind: str(src.sourceKind, 'text'), chars: text.length,
       })
+      if (progress !== null) progress('完成第 ' + (i + 1) + '/' + items.length + ' 篇')
     }
     const compact = docs.map((d) => ({ title: d.title, summary: d.summary, thesis: d.thesis, arguments: d.arguments.slice(0, 3), quotes: d.quotes.slice(0, 3) }))
+    if (progress !== null) progress('跨篇对比汇总中…')
     const finalParsed = await callModelJson(cfg, batchFinalSystem(language), '以下 JSON 数组是 ' + docs.length + ' 篇文章各自的要点：\n\n' + JSON.stringify(compact), 5000, signal)
     const fp = finalParsed !== null && typeof finalParsed === 'object' ? finalParsed : {}
     return {
@@ -1938,7 +1988,7 @@ export function apply(ctx, config) {
       resolveMs = typeof opt.preResolved.resolveMs === 'number' ? opt.preResolved.resolveMs : 0
     } else {
       const t0 = Date.now()
-      src = args.estimate === true ? await resolveForEstimate(args) : await resolveSource(args)
+      src = args.estimate === true ? await resolveForEstimate(args) : await resolveSource(args, { onProgress })
       resolveMs = Date.now() - t0
       text = String(src.text).replace(/\r\n/g, '\n')
     }
@@ -2258,7 +2308,7 @@ export function apply(ctx, config) {
   function renderEstimateMarkdown(v) {
     const est = v.estimate !== null && typeof v.estimate === 'object' ? v.estimate : {}
     const lines = ['# 🧮 预算预检：' + str(v.meta !== null && typeof v.meta === 'object' ? v.meta.source : '', '内容')]
-    const tps = typeof est.estTokensPerSecond === 'number' ? est.estTokensPerSecond : 30
+    const tps = typeof est.estTokensPerSecond === 'number' ? est.estTokensPerSecond : DEFAULT_RATE_TOK_PER_SEC
     const lat = typeof est.estLatencyPerCallMs === 'number' ? est.estLatencyPerCallMs : 800
     if (est.batch === true) {
       lines.push('', '**口径**：中文≈0.6 token/字，拉丁≈0.25 token/字符；时间=(总token÷' + tps + ' tok/s)+(调用次数×' + lat + 'ms)。', '')
@@ -2742,7 +2792,7 @@ export function apply(ctx, config) {
     return s.length > 24 ? s.slice(0, 24) + '…' : s
   }
 
-  async function startBackground(args, input, preResolved, jobs, exec, exportFmt, language, isBatch) {
+  async function startBackground(args, input, preResolved, jobs, exec, exportFmt, language, isBatch, probe) {
     await loadCalibration()
     const depth = normalizeDepth(args.depth)
     let sourceLabelText = '粘贴内容'
@@ -2752,13 +2802,14 @@ export function apply(ctx, config) {
     let sourceKind = 'text'
     let sourceText = '粘贴内容'
 
+    const probeEst = probe !== null && typeof probe === 'object' && typeof probe.estChars === 'number' ? probe : null
     if (isBatch) {
       const items = Array.isArray(args.batch) ? args.batch : []
       M = Math.max(1, items.length)
       sourceLabelText = items.length + ' 篇文档'
       sourceText = items.length + ' 篇文档'
       sourceKind = 'batch'
-    } else {
+    } else if (preResolved !== null && preResolved !== undefined) {
       const text = preResolved.text
       const src = preResolved.src
       chars = text.length
@@ -2769,6 +2820,16 @@ export function apply(ctx, config) {
       const row = est.modes.find((mm) => mm !== null && typeof mm === 'object' && mm.mode === depth) || est.modes[0]
       minutes = row !== null && typeof row.minutes === 'number' ? row.minutes : null
       M = depth === 'quick' ? 1 : Math.max(1, Math.min(splitChunks(text, CHUNK_CHARS).length, MAX_PARTS))
+    } else if (probeEst !== null) {
+      // 大 PDF：全量解析在后台任务内进行，label 用采样外推估算字数/段数/预算
+      chars = Math.max(1, Math.round(probeEst.estChars))
+      sourceKind = typeof probeEst.sourceKind === 'string' ? probeEst.sourceKind : 'pdf'
+      sourceText = typeof probeEst.source === 'string' ? probeEst.source : '粘贴内容'
+      sourceLabelText = sourceLabel(sourceText)
+      const est = buildEstimate('', depth, { chars, tokensPerChar: 0.6 })
+      const row = est.modes.find((mm) => mm !== null && typeof mm === 'object' && mm.mode === depth) || est.modes[0]
+      minutes = row !== null && typeof row.minutes === 'number' ? row.minutes : null
+      M = depth === 'quick' ? 1 : Math.max(1, Math.min(Math.ceil(chars / CHUNK_CHARS), MAX_PARTS))
     }
 
     const label = 'deepread 精读「' + sourceLabelText + '」· ' + M + ' 段' + (minutes !== null ? ' · 预算≈' + minutes + '分钟' : '')
@@ -2795,14 +2856,23 @@ export function apply(ctx, config) {
     const jobId = await jobs.start({
       kind: 'deepread',
       label,
-      outputLimitBytes: 65536,
+      // 与官方 tool-terminal 的 DEFAULT_MAX_RESULT_BYTES 对齐：最终报告是主交付物，
+      // 低于单次读取上限会触发「保留尾部」截断，丢掉报告开头（进度行+标题/摘要）。
+      outputLimitBytes: 256 * 1024,
       owner: exec !== null && typeof exec === 'object' && exec.agent !== undefined ? exec.agent : undefined,
       run: () => {
         void (async () => {
           try {
-            const result = isBatch
-              ? await batchFlow(args, language, signal)
-              : await computeResult(input, { preResolved, onProgress, signal })
+            let result
+            if (isBatch) {
+              result = await batchFlow(args, language, signal, onProgress)
+            } else if (preResolved !== null && preResolved !== undefined) {
+              pushLine('已解析「' + sourceLabelText + '」（' + preResolved.text.length + ' 字' + (typeof preResolved.src.extractMs === 'number' && preResolved.src.extractMs > 0 ? '，PDF 解析 ' + preResolved.src.extractMs + 'ms' : '') + '）')
+              result = await computeResult(input, { preResolved, onProgress, signal })
+            } else {
+              // 大 PDF：解析与逐页进度在任务流内进行
+              result = await computeResult(input, { onProgress, signal })
+            }
             await attachExports(result, exportFmt)
             pushLine('【最终报告】\n' + renderMarkdown(result))
             resolveDone({ status: 'completed' })
@@ -2823,6 +2893,7 @@ export function apply(ctx, config) {
 
     return {
       kind: 'background',
+      title: '后台精读已启动',
       jobId,
       label,
       summary: '后台精读已启动',
@@ -2867,6 +2938,28 @@ export function apply(ctx, config) {
       return result
     }
 
+    // PDF：采样预检（结构 + 前 2 页）判长，避免前台全量解析大文件；
+    // 长 PDF 的全量解析挪进后台任务内逐页报进度（返回 background 前不再静默等待）。
+    const pathArg = typeof args.path === 'string' ? args.path.trim() : ''
+    if (pathArg !== '' && pathArg.toLowerCase().endsWith('.pdf')) {
+      const probeSrc = await resolveSource(args, { statsOnly: true })
+      const ps = probeSrc.pdfStats !== undefined && probeSrc.pdfStats !== null ? probeSrc.pdfStats : null
+      const estChars = ps !== null && typeof ps.sampleChars === 'number' && typeof ps.samplePages === 'number' && ps.samplePages > 0 && typeof ps.pages === 'number'
+        ? Math.max(1, Math.round((ps.sampleChars / ps.samplePages) * ps.pages))
+        : 0
+      if (estChars > tune.backgroundMinChars) {
+        const jobs = ctx.get('jobs')
+        if (jobs !== undefined && typeof jobs.start === 'function') {
+          try {
+            return await startBackground(args, input, null, jobs, exec, exportFmt, language, false, { estChars, source: pathArg, sourceKind: 'pdf' })
+          } catch (err) { /* jobs.start 抛错 → 回退前台全量解析 */ }
+        }
+      }
+      const result = await computeResult(input)
+      await attachExports(result, exportFmt)
+      return result
+    }
+
     // 非 batch 预解析一次（全量）判长，避免 computeResult 重复解析
     const t0 = Date.now()
     const src = await resolveSource(args)
@@ -2899,7 +2992,7 @@ export function apply(ctx, config) {
 
   const tool = defineTool({
     name: 'deepread',
-    description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。五种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；feynman=费曼读书法（浏览目录→提出问题→分章阅读→提取观点数据证据→章节导图→合上书讲解→自检知识缺口→回原文修正→合并全书导图→再讲一次→间隔复习计划）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）、batch（2-10 篇批量精读+跨篇对比）。报告含引用溯源（页码/段落定位）。estimate=true 可先做预算预检（预计 token 与耗时，不调用模型；大 PDF 采用采样外推）。知乎/掘金等反爬站点请粘贴正文。同一链接抓取过的全文会写入本地缓存（默认 7 天），换模式重读同一篇文章不再重新联网抓取；refresh=true 可强制重新抓取。长文（超过 backgroundMinChars）或批量精读会自动转为后台任务：返回 kind=background 与 jobId，用 job_output 轮询进度（「第 i/M 段」）与最终报告，job_kill 可取消。',
+    description: '精读一本书或一篇文章，提取核心观点、论证结构与关键论据。分析结果默认只在会话中展示 Markdown 报告、不写入磁盘；需要落盘时用 export 参数指定格式（md=Markdown、mm=FreeMind 思维导图【XMind 可导入】、html=网页报告、all=全部），文件写入工作区 deepread-output/ 目录。五种模式：quick=快速抓要点；deep=深度精读；map=「观点—证据—数据—关系」知识地图（含四档置信度标注：作者原意/原文事实与数据/合理推断/无法确认）；feynman=费曼读书法（浏览目录→提出问题→分章阅读→提取观点数据证据→章节导图→合上书讲解→自检知识缺口→回原文修正→合并全书导图→再讲一次→间隔复习计划）；book=整本书分部分精读。输入：url（仅微信公众号 mp.weixin.qq.com 稳定链接）、path（.txt/.md/.html/.pdf）、text（粘贴文本）、batch（2-10 篇批量精读+跨篇对比）。报告含引用溯源（页码/段落定位）。estimate=true 可先做预算预检（预计 token 与耗时，不调用模型；大 PDF 采用采样外推）。知乎/掘金等反爬站点请粘贴正文。同一链接抓取过的全文会写入本地缓存（默认 7 天），换模式重读同一篇文章不再重新联网抓取；refresh=true 可强制重新抓取。长文（超过 backgroundMinChars）、大 PDF 或批量精读会自动转为后台任务：返回 kind=background 与 jobId，用 job_output 轮询进度（PDF 逐页解析、「第 i/M 段」、batch 逐篇）与最终报告，job_kill 可取消。',
     timeoutMs: tune.timeoutMs,
     parameters: {
       url: { type: 'string', description: '要精读的网页链接。仅支持微信公众号（mp.weixin.qq.com）的稳定链接；知乎/掘金等有反爬的站点不支持，请粘贴正文。与 path/text 至少提供一个。' },
@@ -2912,6 +3005,29 @@ export function apply(ctx, config) {
       language: { type: 'string', enum: ['zh', 'en', 'auto'], default: 'auto', description: '报告输出语言，默认 auto（跟随原文）。' },
       estimate: { type: 'boolean', default: false, description: '预算预检：true 时不调用模型，只返回各模式的预计调用次数、输入/输出 token 与耗时（按字数估算：中文≈0.6 token/字，拉丁≈0.25 token/字符，输出按各阶段预算计；时间=(总token÷速率)+(调用次数×单次延迟)，速率与延迟可用 Config 调整；大 PDF 采用采样外推）。' },
       batch: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { title: { type: 'string', description: '文档标题（可选，对比报告中用于标识）' }, url: { type: 'string' }, path: { type: 'string' }, text: { type: 'string' }, focus: { type: 'string' } } }, description: '批量精读 2-10 篇并输出跨篇对比报告（对比主题矩阵、冲突点、互补关系与综合结论）。每篇需提供 url/path/text 之一；与 url/path/text 互斥。' },
+    },
+    // 官方 pending 卡（presentCall）：无 client half 的界面（CLI/Codex 等）在工具运行中
+    // 显示这张静态卡（官方 contract 的执行中视图）；Web 端由 client half 注册的 keyed
+    // toolview（tool.call.toolview 键 deepread）替换。presentCall 在 replay 时也会被调用，
+    // 必须软失败、永不抛错。分段数与解析百分比在执行前未知，官方 contract 也不支持
+    // 执行中更新文案——动态进度走后台任务 label 与 job_output 增量（官方 jobs 协议）。
+    presentCall(args) {
+      try {
+        const isBatch = Array.isArray(args.batch) && args.batch.length >= 2
+        const url = typeof args.url === 'string' ? args.url.trim() : ''
+        const path = typeof args.path === 'string' ? args.path.trim() : ''
+        const source = url !== '' ? url : (path !== '' ? path : '粘贴内容')
+        const depthLabel = args.depth === 'quick' ? '快速要点' : (args.depth === 'map' ? '知识地图' : (args.depth === 'feynman' ? '费曼读书法' : (args.depth === 'book' ? '整本书' : '深度精读')))
+        if (args.estimate === true) {
+          return { card: 'generic', kind: 'read', title: 'deepread 预算预检「' + source + '」', content: [{ type: 'text', text: '正在解析来源并估算各模式 token 与耗时（不调用模型）…' }] }
+        }
+        if (isBatch) {
+          return { card: 'generic', kind: 'read', title: 'deepread 批量精读「' + args.batch.length + ' 篇文档」', content: [{ type: 'text', text: '正在逐篇解析与精读，随后生成跨篇对比报告；进度经后台任务逐条推送（job_output 读取）。' }] }
+        }
+        return { card: 'generic', kind: 'read', title: 'deepread 精读「' + source + '」· ' + depthLabel, content: [{ type: 'text', text: '正在解析来源并分段…长文会自动转为后台任务（任务名标注段数与预算），进度经 job_output 逐条推送。' }] }
+      } catch (err) {
+        return undefined
+      }
     },
     output: {
       schema: {

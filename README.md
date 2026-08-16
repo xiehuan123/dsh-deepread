@@ -20,12 +20,13 @@ English | [中文](README.zh.md)
 | 🎨 Browser UI | `deepread` tool result card (four-color confidence legend, collapsible sections) + a 📖 shortcut button next to the input area that opens a card-style reading panel (link/path/text + mode/export selection + reading focus + one-click start) |
 | 🔀 Batch compare | Pass 2-10 documents via `batch` (url/path/text each) to get per-document summaries plus a cross-document report: comparison matrix, conflicts, complementarity, and synthesis |
 | 📍 Citations | Reports carry page/paragraph provenance: arguments, quotes, and a dedicated citation table locate claims back to `【第N页】` markers in the source |
-| 🧮 Cost preview | `estimate: true` previews token spend, model-call count, and expected time per mode without calling the model (CJK≈0.6 tok/char heuristic, configurable rate/latency) |
+| 🧮 Cost preview | `estimate: true` previews token spend, model-call count, and expected time per mode without calling the model (CJK≈0.6 tok/char heuristic; rate/latency defaults are picked per model family and can be overridden explicitly) |
 | 📚 Recently read | The Web panel keeps a local history of recent reads with one-click re-read (localStorage, no server round-trip) |
-| ⏳ Progress transparency | Long reads become official background jobs: label states segment count, streaming progress reports 「精读第 3/20 段…」, job_output polls progress and final report, job_kill cancels |
+| ⏳ Progress transparency | Long reads / big PDFs / batches become official background jobs: the label states segment count and budget; the progress stream pushes 「精读第 3/20 段…」 line by line; job_output polls progress and the final report, job_kill cancels |
+| 🔍 Parse progress | Full PDF extraction moves inside the background job and streams **per page** — 「解析 PDF 中… 42%（10/24 页）」 — after a fast sampling preflight decides length (no more silent wait before the background job appears); batches stream per document — 「解析第 2/5 篇… / 精读第 2/5 篇… / 完成第 2/5 篇」 plus 「跨篇对比汇总中…」 |
 | 🧮 Panel budget | The Web panel shows per-mode token + time hints above the mode chips (e.g. 深度精读 (≈38k token · ≈8分钟)), instantly for pasted text; calibrated by real model speed; links/file paths are fetched and estimated by the Host through a same-origin API (`POST /api/deepread/budget`) and the panel's 🔍 budget-preflight button shows a one-line result (≈N chars · ≈X token · ≈Y min) right inside the panel — no chat round-trip, no table | |
 | ⚡ Fast preflight | estimate mode samples the first 2 PDF pages and extrapolates by page count, so big PDF budgets come back in milliseconds |
-| 🎯 Self-calibration | Real token/s measured from every model call feeds a rolling average persisted in storage — estimates converge to your actual provider speed |
+| 🎯 Self-calibration | Real token/s measured from every model call feeds a rolling average persisted in storage — estimates converge to your actual provider speed; cold-start defaults are per model family (DeepSeek/Kimi/Qwen ≈100-110 tok/s, Claude ≈70, GPT ≈90) |
 
 ## Five modes compared
 
