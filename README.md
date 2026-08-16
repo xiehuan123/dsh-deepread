@@ -51,10 +51,10 @@ Requires **pnpm** on the machine (`dsh plugin` runs pnpm underneath to install p
 dsh plugin --profile web add dsh-deepread
 
 # Pin a version
-dsh plugin --profile web add dsh-deepread@^0.3.9
+dsh plugin --profile web add dsh-deepread@^0.5.4
 
 # From GitHub (source; build artifacts are committed)
-dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v0.3.9"
+dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v0.5.4"
 ```
 
 Restart `dsh web` for it to take effect. A 📖 shortcut button appears next to the input area; click it to open the card-style reading panel. You can also just say: "Read this article in knowledge-map mode: <content>".

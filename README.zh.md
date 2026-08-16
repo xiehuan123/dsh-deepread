@@ -51,10 +51,10 @@
 dsh plugin --profile web add dsh-deepread
 
 # 指定版本
-dsh plugin --profile web add dsh-deepread@^0.3.9
+dsh plugin --profile web add dsh-deepread@^0.5.4
 
 # 从 GitHub 安装（源码；构建产物已提交）
-dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v0.3.9"
+dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v0.5.4"
 ```
 
 重启 dsh web 后生效。输入区左侧出现 📖 快捷按钮，点击弹出卡片式精读面板。对话中也可直接说「用知识地图模式精读这篇文章：<内容>」。
