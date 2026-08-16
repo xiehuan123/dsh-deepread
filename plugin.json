@@ -1,4 +1,5 @@
 {
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "dsh-deepread",
   "version": "0.5.4",
   "description": "Deep-reading assistant: five modes (quick, deep, knowledge-map, Feynman, full book) to extract core claims, argument structure, and key evidence from books and articles; exports Markdown, FreeMind/XMind mindmaps, and HTML reports.",
@@ -22,8 +23,5 @@
     "pdf",
     "markdown",
     "chinese"
-  ],
-  "skills": [
-    "./skills/dsh-deepread"
   ]
 }
