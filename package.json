@@ -79,6 +79,7 @@
     "skills/",
     ".claude-plugin/",
     ".codex-plugin/",
+    "plugin.json",
     "README.md",
     "README.zh.md",
     "assets/",

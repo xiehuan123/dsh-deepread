@@ -160,6 +160,7 @@ Quickly summarize this article: <paste text>
 ├── test/                   # smoke tests: Node tool pipeline + client factory-bundle contract
 ├── assets/                 # README and showcase visuals
 ├── skills/dsh-deepread/    # Codex / Claude Code compatible skill (SKILL.md + references + agents/openai.yaml)
+├── plugin.json             # Agent Plugins-compatible root manifest
 ├── .claude-plugin/         # Claude Code plugin manifests (plugin.json + marketplace.json)
 └── .codex-plugin/          # Codex plugin manifest (plugin.json)
 ```
