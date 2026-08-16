@@ -1,13 +1,54 @@
-# 📖 DeepRead Assistant (dsh-deepread)
+# 📖 DeepRead — Evidence-first reading for AI agents
 
 English | [中文](README.zh.md)
 
-> Deep-read a book or an article: extract core claims, argument structure, and key evidence into a structured "claim–evidence–data–relation" report.
-> Official bundle plugin: the Node half registers the `deepread` tool, the client half provides the result card and the reading bar in the input area.
+> Turn long articles, books, PDFs, and document sets into traceable claims, evidence, confidence levels, knowledge maps, and review questions.
 
 [![npm version](https://img.shields.io/npm/v/dsh-deepread)](https://www.npmjs.com/package/dsh-deepread)
+[![GitHub release](https://img.shields.io/github/v/release/xiehuan123/dsh-deepread?display_name=tag)](https://github.com/xiehuan123/dsh-deepread/releases/latest)
+[![Agent Skill](https://img.shields.io/badge/Agent%20Skill-Codex%20%7C%20Claude%20Code-6366f1)](./skills/dsh-deepread/SKILL.md)
 [![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin)
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+![DeepRead evidence-first reading workflow](assets/deepread-demo.svg)
+
+DeepRead is available in two compatible forms:
+
+- **Portable Agent Skill** for Codex, Claude Code, and other Agent Skills-compatible tools. Zero runtime dependencies; the agent follows the evidence-first reading workflow with its own file and web tools.
+- **Full DeepSeek Harness plugin** with a `deepread` tool, browser UI, PDF extraction, background jobs, progress updates, batch comparison, cost preview, and HTML/XMind-compatible export.
+
+## Quick start
+
+### Portable Agent Skill
+
+```sh
+npx skills@latest add xiehuan123/dsh-deepread
+```
+
+Then ask your agent:
+
+```text
+Deep-read docs/architecture.pdf in knowledge-map mode.
+For every important claim, show the supporting evidence and source location.
+```
+
+### Full DeepSeek Harness plugin
+
+```sh
+dsh plugin --profile web add dsh-deepread
+```
+
+Restart `dsh web`, then use the 📖 reading panel or call the `deepread` tool in chat.
+
+## See it in action
+
+The repository includes real, reproducible output rather than placeholder screenshots:
+
+- [`deep` mode: Claude Code token optimization](examples/claude-code-token-optimization.md) — claims, evidence, argument flow, concepts, and critical questions.
+- [`map` mode: fact-check knowledge map](examples/ad-fact-check-knowledge-map.md) — confidence levels, evidence pairing, data table, relation labels, Mermaid map, and recall questions.
+- [`deep` mode: vivo Tauri architecture](examples/vivo-tauri-architecture.md) — architecture decisions, supporting data, and limitations.
+
+DeepRead never silently upgrades a theme into a claim or fills missing support with invented evidence. If the source does not support a claim, the report says so.
 
 ## Features
 
@@ -24,7 +65,7 @@ English | [中文](README.zh.md)
 | 📚 Recently read | The Web panel keeps a local history of recent reads with one-click re-read (localStorage, no server round-trip) |
 | ⏳ Progress transparency | Long reads / big PDFs / batches become official background jobs: the label states segment count and budget; the progress stream pushes 「精读第 3/20 段…」 line by line; job_output polls progress and the final report, job_kill cancels |
 | 🔍 Parse progress | Full PDF extraction moves inside the background job and streams **per page** — 「解析 PDF 中… 42%（10/24 页）」 — after a fast sampling preflight decides length (no more silent wait before the background job appears); batches stream per document — 「解析第 2/5 篇… / 精读第 2/5 篇… / 完成第 2/5 篇」 plus 「跨篇对比汇总中…」 |
-| 🧮 Panel budget | The Web panel shows per-mode token + time hints above the mode chips (e.g. 深度精读 (≈38k token · ≈8分钟)), instantly for pasted text; calibrated by real model speed; links/file paths are fetched and estimated by the Host through a same-origin API (`POST /api/deepread/budget`) and the panel's 🔍 budget-preflight button shows a one-line result (≈N chars · ≈X token · ≈Y min) right inside the panel — no chat round-trip, no table | |
+| 🧮 Panel budget | The Web panel shows per-mode token + time hints above the mode chips (e.g. 深度精读 (≈38k token · ≈8分钟)), instantly for pasted text; calibrated by real model speed; links/file paths are fetched and estimated by the Host through a same-origin API (`POST /api/deepread/budget`) and the panel's 🔍 budget-preflight button shows a one-line result (≈N chars · ≈X token · ≈Y min) right inside the panel — no chat round-trip, no table |
 | ⚡ Fast preflight | estimate mode samples the first 2 PDF pages and extrapolates by page count, so big PDF budgets come back in milliseconds |
 | 🎯 Self-calibration | Real token/s measured from every model call feeds a rolling average persisted in storage — estimates converge to your actual provider speed; cold-start defaults are per model family (DeepSeek/Kimi/Qwen ≈100-110 tok/s, Claude ≈70, GPT ≈90) |
 
@@ -117,6 +158,7 @@ Quickly summarize this article: <paste text>
 ├── scripts/build-client.mjs# bundles client source into the C6 factory artifact lib/client.js (do not edit by hand)
 ├── lib/client.js           # Client half (generated): __ModuleLoader__.load({ id, factory })
 ├── test/                   # smoke tests: Node tool pipeline + client factory-bundle contract
+├── assets/                 # README and showcase visuals
 ├── skills/dsh-deepread/    # Codex / Claude Code compatible skill (SKILL.md + references + agents/openai.yaml)
 ├── .claude-plugin/         # Claude Code plugin manifests (plugin.json + marketplace.json)
 └── .codex-plugin/          # Codex plugin manifest (plugin.json)

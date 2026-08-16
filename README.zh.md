@@ -9,6 +9,25 @@
 [![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin)
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+![DeepRead 证据优先精读流程](assets/deepread-demo.svg)
+
+DeepRead 同时提供两种兼容形态：
+
+- **便携 Agent Skill**：适用于 Codex、Claude Code 及其他兼容 Agent Skills 的工具，零运行时依赖。
+- **完整 DeepSeek Harness 插件**：包含 `deepread` 工具、浏览器界面、PDF 抽取、后台任务、进度显示、批量对比、成本预估和 HTML/XMind 导出。
+
+## 快速开始
+
+```sh
+# Codex / Claude Code / Agent Skills
+npx skills@latest add xiehuan123/dsh-deepread
+
+# 完整 DSH 插件
+dsh plugin --profile web add dsh-deepread
+```
+
+真实输出样例：[`deep` 深度精读](examples/claude-code-token-optimization.md) · [`map` 知识地图](examples/ad-fact-check-knowledge-map.md) · [架构文章精读](examples/vivo-tauri-architecture.md)
+
 ## 功能
 
 | 能力 | 说明 |
@@ -24,7 +43,7 @@
 | 📚 最近读过 | Web 面板内置本地历史记录（localStorage），一键重新精读 |
 | ⏳ 进度透明 | 长文/大 PDF/批量精读自动转为官方后台任务：任务名标注分段数与预算；进度流逐段推送「精读第 3/20 段…」，job_output 轮询进度与最终报告，job_kill 可取消 |
 | 🔍 解析进度 | 大 PDF 的全量解析挪进后台任务内**逐页推送**「解析 PDF 中… 42%（10/24 页）」（采样预检判长，返回后台任务前不再静默等待）；批量精读逐篇推送「解析第 2/5 篇… / 精读第 2/5 篇… / 完成第 2/5 篇」与「跨篇对比汇总中…」 |
-| 🧮 面板预算 | Web 面板模式按钮上方实时显示各模式 token 与耗时（如 深度精读 (≈38k token · ≈8分钟)），粘贴文本即时计算，并随真实模型速度自校准；链接/文件路径点面板「🔍 预算预检」按钮，经同源 API（`POST /api/deepread/budget`）由 Host 直接抓取/读取并估算，**面板内即时显示一行结论**（约 N 字 · ≈X token · ≈Y 分钟），不跳对话、不渲染表格 | |
+| 🧮 面板预算 | Web 面板模式按钮上方实时显示各模式 token 与耗时（如 深度精读 (≈38k token · ≈8分钟)），粘贴文本即时计算，并随真实模型速度自校准；链接/文件路径点面板「🔍 预算预检」按钮，经同源 API（`POST /api/deepread/budget`）由 Host 直接抓取/读取并估算，**面板内即时显示一行结论**（约 N 字 · ≈X token · ≈Y 分钟），不跳对话、不渲染表格 |
 | ⚡ 采样预检 | estimate 模式对 PDF 只采前 2 页并按页数外推，大 PDF 预算毫秒级返回 |
 | 🎯 自校准 | 每次模型调用实测 token/秒，滚动平均持久化——估算随你的真实模型速度收敛；冷启动默认值按模型族给出（DeepSeek/Kimi/Qwen 等 ≈100-110 tok/s，Claude ≈70，GPT ≈90） |
 

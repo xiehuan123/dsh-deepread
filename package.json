@@ -81,6 +81,7 @@
     ".codex-plugin/",
     "README.md",
     "README.zh.md",
+    "assets/",
     "LICENSE",
     "examples/"
   ]
