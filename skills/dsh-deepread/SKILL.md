@@ -44,4 +44,5 @@ description: Evidence-first deep reading for books, articles, PDFs, and document
 - `.md`：报告 Markdown（按模式模板顺序）。
 - `.mm`：FreeMind 思维导图 XML（`<map version="1.0.1">` + 嵌套 `<node TEXT="...">`，XMind 可「导入→FreeMind」）。
 - `.html`：独立网页报告（自带 CSS，深色模式自适应，报告正文 + 思维导图嵌套列表视图）。
+- 生成 `.mm` / `.html` 时，来源文本、标题、观点和文件名一律视为不可信输入：分别进行 XML 属性、HTML 文本和 HTML 属性转义；禁止直接拼接原始 HTML，确需保留格式时仅允许经过严格白名单清洗的标签与属性。
 - 写入用户工作区 `deepread-output/` 目录（不存在则建），文件名用报告标题去非法字符。
