@@ -150,8 +150,9 @@ npx skills@latest add xiehuan123/dsh-deepread      # 或 skills.sh
 URL 抓取的全文按官方 storageDomain 约定落盘：`deepread_url_cache` 领域（版本 1，zod schema
 校验，记录含 `url`/`text`/`fetchedAt`），存于 `$DSH_HOME/storages/`，跨进程重启仍然有效。
 同一篇文章换模式（deep→map/feynman/book）直接复用缓存、不再联网；抓取失败时自动回退缓存并
-在报告中注明。TTL 默认 7 天，条目上限 200（写入时惰性清理过期项）。未挂载 storage 的
-profile（如无 web 组合包的 headless）自动降级为进程内缓存。
+在报告中注明。TTL 默认 7 天，条目上限 200（写入时惰性清理过期项）。在仍满足插件 Node
+依赖、但未挂载 storageDomain 的自定义 Web composition 中会降级为进程内缓存；stock
+`headless` profile 不提供当前插件硬依赖的 `webServer`，因此目前不属于支持的激活环境。
 
 ## 插件配置（Config）
 
@@ -169,6 +170,8 @@ profile（如无 web 组合包的 headless）自动降级为进程内缓存。
 ```
 
 ## 开发
+
+维护宿主集成前先阅读 [DeepSeek Harness 插件集成参考](docs/deepseek-harness-integration.md)，其中记录了 profile 装载、Node/Browser 双入口、slot 生命周期、主题规则和排障顺序。
 
 ```sh
 npm run build:client   # 从 src/client/index.js 重新生成 lib/client.js

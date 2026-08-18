@@ -177,8 +177,10 @@ Fetched article full texts are persisted following the official storageDomain co
 stored under `$DSH_HOME/storages/` and surviving process restarts. Re-reading the same article in a
 different mode (deep→map/feynman/book) reuses the cache without network access; when a fetch fails the
 cache is used as a fallback and the report says so. Default TTL is 7 days with a cap of 200 entries
-(expired entries are lazily removed on write). Profiles without storage mounted (e.g. a headless
-composition without the web bundle) automatically degrade to an in-process cache.
+(expired entries are lazily removed on write). A custom Web composition that still satisfies the
+plugin's Node dependencies but omits `storageDomain` degrades to an in-process cache. The stock
+`headless` profile does not provide the plugin's required `webServer`, so it is not currently a
+supported activation environment.
 
 ## Plugin configuration (Config)
 
@@ -196,6 +198,8 @@ composition without the web bundle) automatically degrade to an in-process cache
 ```
 
 ## Development
+
+Before maintaining the host integration, read the [DeepSeek Harness plugin integration reference](docs/deepseek-harness-integration.md). It records profile loading, the Node/browser entry points, slot lifecycle, theme rules, and the diagnostic order.
 
 ```sh
 npm run build:client   # regenerate lib/client.js from src/client/index.js
