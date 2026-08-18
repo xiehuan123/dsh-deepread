@@ -3,10 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const ENTRY_PATHS = {
-  legacy: './index.mjs',
-  typescript: './lib/types/index.js',
-}
+const ENTRY_PATHS = { typescript: './lib/types/index.js' }
 
 async function writeModule(directory, name, source) {
   await mkdir(directory, { recursive: true })

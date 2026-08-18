@@ -1,5 +1,4 @@
-import type { Config as ConfigOptions } from './host/types.js';
-export { apply, inject, name } from './host/plugin.js';
+import type { Config as ConfigOptions } from './types.js';
 export declare const Config: import("@deepseek-ai/schemastery").default<Schemastery.ObjectS<{
     timeoutMs: import("@deepseek-ai/schemastery").default<number, number>;
     chunkChars: import("@deepseek-ai/schemastery").default<number, number>;
@@ -21,4 +20,6 @@ export declare const Config: import("@deepseek-ai/schemastery").default<Schemast
     estLatencyPerCallMs: import("@deepseek-ai/schemastery").default<number, number>;
     backgroundMinChars: import("@deepseek-ai/schemastery").default<number, number>;
 }>>;
-export type Config = ConfigOptions;
+export declare const name = "deepread";
+export declare const inject: string[];
+export declare function apply(ctx: unknown, config?: ConfigOptions): void;

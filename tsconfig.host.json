@@ -2,6 +2,7 @@
   "compilerOptions": {
     "declaration": true,
     "exactOptionalPropertyTypes": true,
+    "lib": ["ES2023", "ESNext.Disposable", "DOM"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "noEmitOnError": true,
@@ -16,6 +17,6 @@
   },
   "include": [
     "src/index.ts",
-    "legacy/index.d.mts"
+    "src/host/**/*.ts"
   ]
 }

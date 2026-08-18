@@ -22,7 +22,7 @@ dsh plugin --profile web add <包>
   -> 包名加入 profile 的 dsh.profile.bundles
   -> 启动时合并 cordis.patch.yml
   -> 加载 lib/types/index.js，执行 apply(ctx, config)
-  -> 适配入口委托给 lib/legacy/index.mjs 中的现有 Host 实现
+  -> 严格 TypeScript Host 模块注册工具、缓存、预算路由与生命周期资源
   -> 注册 deepread 工具和 /api/deepread/budget
 
 dsh web
@@ -73,9 +73,9 @@ Harness 依次应用：
 
 ## Node half
 
-[`src/index.ts`](../src/index.ts) 是严格 TypeScript 公共适配入口，由 `tsc` 构建为 `lib/types/index.js` 和声明文件。DR-110 阶段尚未迁移现有业务实现；`npm run build:host` 会把根 [`index.mjs`](../index.mjs) 复制为包内 `lib/legacy/index.mjs`，公共适配入口只转发稳定的 `name`、`Config`、`apply` 和 Cordis 激活所需的 `inject`。发布包不再包含或依赖根 `index.mjs`。
+[`src/index.ts`](../src/index.ts) 是严格 TypeScript 公共入口，由 `tsc` 构建为 `lib/types/index.js` 和声明文件。Host 运行时按配置、缓存、来源解析、PDF、LLM、分析与导出边界拆分在 `src/host/`；生成的同构模块位于 `lib/types/host/`。发布包不包含或依赖 legacy Host JavaScript。
 
-当前 legacy Host 实现负责：
+当前 Host 实现负责：
 
 - 声明 `Config`；
 - 注册 `deepread` 工具及其输入、运行中展示和结果渲染；
