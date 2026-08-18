@@ -29,7 +29,6 @@ try {
     'web',
     'agentDefaultModel',
     'sandboxPolicy',
-    'webServer',
   ])
 } finally {
   await loaded.cleanup()

@@ -283,6 +283,10 @@ export interface WebServerService {
   }): () => void
 }
 
+export interface HostInjectionFiber {
+  dispose(): void | Promise<void>
+}
+
 export interface ToolLike {
   name: string
   execute(args: unknown, exec: unknown): Promise<unknown>
@@ -294,8 +298,14 @@ export interface HostContext {
   llm?: unknown
   tools: { register(tool: ToolLike): () => void }
   webServer?: WebServerService
-  effect(register: () => void | (() => void)): void
+  storageDomain?: StorageDomainService
+  effect(register: () => void | (() => void | Promise<void>)): void
+  inject?(
+    dependencies: readonly string[],
+    callback: (ctx: HostContext) => void,
+  ): HostInjectionFiber
   get(name: 'web'): WebService | undefined
+  get(name: 'webServer'): WebServerService | undefined
   get(name: 'storageDomain'): StorageDomainService | undefined
   get(name: 'jobs'): JobsService | undefined
   get(name: 'agentDefaultModel'): { currentSelection(): unknown } | undefined

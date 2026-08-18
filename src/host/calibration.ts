@@ -1,7 +1,8 @@
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 
-import type { CalibrationRecord, HostContext, RuntimeConfig, StorageDomainHandle, StorageTable } from './types.js'
+import { createOptionalStorageTable } from './optional-storage.js'
+import type { CalibrationRecord, HostContext, RuntimeConfig, StorageTable } from './types.js'
 import { isRecord } from './types.js'
 
 const declareDomain = defineDomain as unknown as (spec: unknown) => unknown
@@ -43,10 +44,11 @@ export function createCalibrationRuntime(ctx: HostContext, tune: RuntimeConfig) 
     updatedAt: string | null
     loaded: boolean
   } = { rateTokPerSec: null, latencyMs: null, calls: 0, updatedAt: null, loaded: false }
-  let domainHandle: StorageDomainHandle | null = null
-  let tablePromise: Promise<StorageTable<string, CalibrationRecord> | null> | null = null
-
-  ctx.effect(() => () => { if (domainHandle !== null) void domainHandle.close() })
+  const { getTable } = createOptionalStorageTable<StorageTable<string, CalibrationRecord>>(
+    ctx,
+    statsDomainSpec,
+    (domain) => domain.table('stats'),
+  )
 
   function calibratedRate(): number | null {
     return state.rateTokPerSec !== null && Number.isFinite(state.rateTokPerSec) && state.rateTokPerSec > 0 ? state.rateTokPerSec : null
@@ -74,27 +76,11 @@ export function createCalibrationRuntime(ctx: HostContext, tune: RuntimeConfig) 
     return calibratedLatency() ?? (tune.estLatencyPerCallMs > 0 ? tune.estLatencyPerCallMs : modelRateDefaults().latency)
   }
 
-  function getTable(): Promise<StorageTable<string, CalibrationRecord> | null> {
-    if (tablePromise === null) {
-      tablePromise = (async () => {
-        const storageDomain = ctx.get('storageDomain')
-        if (storageDomain === undefined || typeof storageDomain.open !== 'function') return null
-        try {
-          domainHandle = await storageDomain.open(statsDomainSpec)
-          return domainHandle.table('stats')
-        } catch {
-          return null
-        }
-      })()
-    }
-    return tablePromise
-  }
-
   async function loadCalibration(): Promise<void> {
     if (state.loaded) return
-    state.loaded = true
     const table = await getTable()
     if (table === null) return
+    state.loaded = true
     try {
       const record = table.get('default')
       if (isRecord(record) && typeof record.rateTokPerSec === 'number' && record.rateTokPerSec > 0) {

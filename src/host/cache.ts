@@ -1,7 +1,8 @@
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 
-import type { CacheRecord, HostContext, RuntimeConfig, StorageDomainHandle, StorageTable } from './types.js'
+import { createOptionalStorageTable } from './optional-storage.js'
+import type { CacheRecord, HostContext, RuntimeConfig, StorageTable } from './types.js'
 import { isRecord } from './types.js'
 
 const declareDomain = defineDomain as unknown as (spec: unknown) => unknown
@@ -23,27 +24,11 @@ export function createUrlCache(ctx: HostContext, tune: RuntimeConfig) {
   const ttlMs = tune.cacheTtlHours * 3600 * 1000
   const maxEntries = 200
   const memory = new Map<string, CacheRecord>()
-  let domainHandle: StorageDomainHandle | null = null
-  let tablePromise: Promise<StorageTable<string, CacheRecord> | null> | null = null
-
-  ctx.effect(() => () => { if (domainHandle !== null) void domainHandle.close() })
-
-  function getTable(): Promise<StorageTable<string, CacheRecord> | null> {
-    if (tablePromise === null) {
-      tablePromise = (async () => {
-        const storageDomain = ctx.get('storageDomain')
-        if (storageDomain === undefined) return null
-        try {
-          const domain = await storageDomain.open(cacheDomainSpec)
-          domainHandle = domain
-          return domain.table('articles')
-        } catch {
-          return null
-        }
-      })()
-    }
-    return tablePromise
-  }
+  const { getTable } = createOptionalStorageTable<StorageTable<string, CacheRecord>>(
+    ctx,
+    cacheDomainSpec,
+    (domain) => domain.table('articles'),
+  )
 
   function isStale(fetchedAt: string): boolean {
     const fetchedAtMs = Date.parse(fetchedAt)
