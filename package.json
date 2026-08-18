@@ -16,6 +16,7 @@
     },
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./dsh-plugin.json": "./dsh-plugin.json",
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -24,7 +25,7 @@
     "build": "npm run build:host && npm run build:client",
     "typecheck:host": "tsc --project tsconfig.host.json --noEmit",
     "prepack": "npm run build",
-    "test": "node test/host-build.mjs && node test/host-types.mjs && node test/package-entry.mjs && node test/host-pack.mjs && node test/host-typescript-runtime.mjs && node test/compatibility-baseline.mjs && node test/smoke.mjs && node test/client-bundle.mjs && node test/budget-api.mjs && node test/optional-services.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs && node test/features.mjs && node test/pdf-stats.mjs && node test/calibration.mjs && node test/jobs-progress.mjs"
+    "test": "node test/dsh-tui-manifest.mjs && node test/dsh-tui-pack.mjs && node test/host-build.mjs && node test/host-types.mjs && node test/package-entry.mjs && node test/host-pack.mjs && node test/host-typescript-runtime.mjs && node test/compatibility-baseline.mjs && node test/smoke.mjs && node test/client-bundle.mjs && node test/budget-api.mjs && node test/optional-services.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs && node test/features.mjs && node test/pdf-stats.mjs && node test/calibration.mjs && node test/jobs-progress.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
@@ -90,6 +91,7 @@
     "tsconfig.host.json",
     "test/",
     "cordis.patch.yml",
+    "dsh-plugin.json",
     "skills/",
     ".claude-plugin/",
     ".codex-plugin/",

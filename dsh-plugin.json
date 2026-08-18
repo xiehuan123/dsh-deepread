@@ -1,0 +1,25 @@
+{
+  "$schema": "https://dsh.community/schemas/dsh-plugin-0.15.json",
+  "manifestVersion": "0.15",
+  "id": "io.github.xiehuan123.dsh-deepread",
+  "name": "DeepRead",
+  "version": "0.5.4",
+  "facets": {
+    "host": {
+      "entry": "./lib/types/index.js",
+      "apiVersion": "v1alpha1"
+    }
+  },
+  "requires": {
+    "contracts": []
+  },
+  "permissions": [],
+  "contributes": {
+    "commands": []
+  },
+  "subscriptions": [],
+  "license": "MIT",
+  "source": {
+    "repository": "https://github.com/xiehuan123/dsh-deepread"
+  }
+}
