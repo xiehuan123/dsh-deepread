@@ -1,0 +1,25 @@
+{
+  "history": {
+    "key": "dsh-deepread-history-v1",
+    "value": [
+      {
+        "id": "https://example.invalid/compatibility|article|旧版兼容性样例",
+        "title": "旧版兼容性样例",
+        "kind": "article",
+        "depth": "deep",
+        "source": "https://example.invalid/compatibility",
+        "chars": 2048,
+        "time": 1710000000000,
+        "summary": "用于验证 0.5.4 浏览历史格式的合成摘要。",
+        "thesis": "公开存储键和记录字段在升级后保持可读。"
+      }
+    ]
+  },
+  "calibration": {
+    "key": "dsh-deepread-calib",
+    "value": {
+      "rate": 80,
+      "latency": 600
+    }
+  }
+}
