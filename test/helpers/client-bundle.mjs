@@ -27,9 +27,10 @@ export async function loadClientBundle(root, fixture) {
     localStorage: globalThis.localStorage,
   }
   const readKeys = []
+  const writtenKeys = []
   const values = new Map([
-    [fixture.history.key, JSON.stringify(fixture.history.value)],
-    [fixture.calibration.key, JSON.stringify(fixture.calibration.value)],
+    [fixture.history.key, fixture.history.raw ?? JSON.stringify(fixture.history.value)],
+    [fixture.calibration.key, fixture.calibration.raw ?? JSON.stringify(fixture.calibration.value)],
   ])
 
   globalThis.window = globalThis
@@ -39,6 +40,7 @@ export async function loadClientBundle(root, fixture) {
       return values.has(key) ? values.get(key) : null
     },
     setItem(key, value) {
+      writtenKeys.push(key)
       values.set(key, String(value))
     },
   }
@@ -59,8 +61,9 @@ export async function loadClientBundle(root, fixture) {
       if (activeHooks[index] === undefined) {
         activeHooks[index] = { value: typeof initial === 'function' ? initial() : initial }
       }
+      const hooks = activeHooks
       return [activeHooks[index].value, (value) => {
-        activeHooks[index].value = typeof value === 'function' ? value(activeHooks[index].value) : value
+        hooks[index].value = typeof value === 'function' ? value(hooks[index].value) : value
       }]
     },
     useEffect(effect) {
@@ -93,6 +96,8 @@ export async function loadClientBundle(root, fixture) {
 
   const composerHooks = []
   const panelHooks = []
+  const historyItemHooks = []
+  const submissions = []
   const composerWrapper = components['conversation.input.left']
   const panelWrapper = components['shell.overlay']
   if (typeof composerWrapper !== 'function' || typeof panelWrapper !== 'function') {
@@ -107,12 +112,32 @@ export async function loadClientBundle(root, fixture) {
 
   return {
     readKeys,
+    writtenKeys,
+    storedValue(key) { return values.get(key) },
     openPanel() {
       const button = renderFunctionElement(composerWrapper(), composerHooks)
       button.props.onClick()
     },
     renderPanel() {
-      return renderFunctionElement(panelWrapper({ submitDeepread: () => null }), panelHooks)
+      return renderFunctionElement(panelWrapper({ submitDeepread: (instruction) => { submissions.push(instruction); return null } }), panelHooks)
+    },
+    rereadFirstHistoryItemAndSubmit() {
+      let panel = renderFunctionElement(panelWrapper({ submitDeepread: (instruction) => { submissions.push(instruction); return null } }), panelHooks)
+      const item = findElement(panel, (element) => typeof element.type === 'function' && element.props?.item !== undefined)
+      if (item === null) throw new Error('deepread panel history item was not rendered')
+      let renderedItem = renderFunctionElement(item, historyItemHooks)
+      const head = findElement(renderedItem, (element) => element.props?.className === 'dr-history-head')
+      if (head === null) throw new Error('deepread history item header was not rendered')
+      head.props.onClick()
+      renderedItem = renderFunctionElement(item, historyItemHooks)
+      const reread = findElement(renderedItem, (element) => element.props?.className === 'dr-history-reread')
+      if (reread === null) throw new Error('deepread history reread action was not rendered')
+      reread.props.onClick()
+      panel = renderFunctionElement(panelWrapper({ submitDeepread: (instruction) => { submissions.push(instruction); return null } }), panelHooks)
+      const submit = findElement(panel, (element) => element.props?.className === 'dr-submit')
+      if (submit === null) throw new Error('deepread panel submit action was not rendered')
+      submit.props.onClick()
+      return submissions.at(-1)
     },
     changeTextarea(panel, value) {
       const textarea = findElement(panel, (element) => element.type === 'textarea')

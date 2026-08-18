@@ -25,7 +25,7 @@
     "build": "npm run build:host && npm run build:client",
     "typecheck:host": "tsc --project tsconfig.host.json --noEmit",
     "prepack": "npm run build",
-    "test": "node test/dsh-tui-manifest.mjs && node test/dsh-tui-pack.mjs && node test/host-build.mjs && node test/host-types.mjs && node test/package-entry.mjs && node test/host-pack.mjs && node test/host-typescript-runtime.mjs && node test/compatibility-baseline.mjs && node test/smoke.mjs && node test/client-bundle.mjs && node test/budget-api.mjs && node test/optional-services.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs && node test/features.mjs && node test/pdf-stats.mjs && node test/calibration.mjs && node test/jobs-progress.mjs"
+    "test": "node test/dsh-tui-manifest.mjs && node test/dsh-tui-pack.mjs && node test/host-build.mjs && node test/host-types.mjs && node test/package-entry.mjs && node test/host-pack.mjs && node test/host-typescript-runtime.mjs && node test/compatibility-baseline.mjs && node test/data-identity-gate.mjs && node test/data-compat-web.mjs && node test/data-compat-cache.mjs && node test/data-compat-stats.mjs && node test/smoke.mjs && node test/client-bundle.mjs && node test/budget-api.mjs && node test/optional-services.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs && node test/features.mjs && node test/pdf-stats.mjs && node test/calibration.mjs && node test/jobs-progress.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

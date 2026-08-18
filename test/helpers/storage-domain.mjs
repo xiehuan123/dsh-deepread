@@ -1,6 +1,9 @@
 export function createFixtureStorageDomain(fixtures) {
-  const fixtureByDomain = new Map(fixtures.map((fixture) => [fixture.domain, fixture]))
   const observations = new Map()
+  const rowsByDomain = new Map()
+  for (const fixture of fixtures) {
+    rowsByDomain.set(fixture.domain, new Map([[fixture.key, structuredClone(fixture.record)]]))
+  }
 
   return {
     service: {
@@ -12,9 +15,8 @@ export function createFixtureStorageDomain(fixtures) {
           keys: [],
         }
         observations.set(spec.name, observation)
-        const fixture = fixtureByDomain.get(spec.name)
-        const rows = new Map()
-        if (fixture !== undefined) rows.set(fixture.key, structuredClone(fixture.record))
+        const rows = rowsByDomain.get(spec.name) ?? new Map()
+        rowsByDomain.set(spec.name, rows)
 
         return {
           async close() {},
@@ -37,5 +39,14 @@ export function createFixtureStorageDomain(fixtures) {
     observed(domain) {
       return structuredClone(observations.get(domain))
     },
+  }
+}
+
+export async function readStorageRecord(service, domainName, version, tableName, key) {
+  const domain = await service.open({ name: domainName, version, tables: {} })
+  try {
+    return structuredClone(domain.table(tableName).get(key))
+  } finally {
+    await domain.close()
   }
 }

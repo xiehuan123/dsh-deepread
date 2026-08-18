@@ -1,9 +1,11 @@
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const ENTRY_PATHS = { typescript: './lib/types/index.js' }
+const LEGACY_054_COMMIT = 'cbfffab353112180456a6c26ed83de092d54ac12'
 
 async function writeModule(directory, name, source) {
   await mkdir(directory, { recursive: true })
@@ -66,10 +68,18 @@ export async function loadPluginEntry(root, target = 'published') {
     await cp(join(root, path), join(packageDir, path))
   }
   await cp(join(root, 'lib'), join(packageDir, 'lib'), { recursive: true })
+  if (target === 'legacy-0.5.4') {
+    const legacySource = execFileSync('git', ['show', `${LEGACY_054_COMMIT}:index.mjs`], { cwd: root, encoding: 'utf8' })
+    await writeFile(join(packageDir, 'index.mjs'), legacySource)
+  }
   await installPeerShims(packageDir)
 
   const packageJson = JSON.parse(await readFile(join(packageDir, 'package.json'), 'utf8'))
-  const relativeEntry = target === 'published' ? publishedEntry(packageJson) : ENTRY_PATHS[target]
+  const relativeEntry = target === 'published'
+    ? publishedEntry(packageJson)
+    : target === 'legacy-0.5.4'
+      ? './index.mjs'
+      : ENTRY_PATHS[target]
   if (relativeEntry === undefined) throw new Error(`unknown plugin entry target: ${target}`)
   const module = await import(pathToFileURL(join(packageDir, relativeEntry)).href)
 
