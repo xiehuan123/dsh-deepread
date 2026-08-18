@@ -145,6 +145,8 @@
 - 关闭再打开可保留本次页面生命周期内的位置；刷新后不保证保留。
 - 尊重文本选择和按钮点击，不以全局 `preventDefault` 破坏正常交互。
 
+架构决策：对 Harness rc.7 的源码审计确认，`shell.overlay` 只提供挂载与生命周期，当前没有公共 draggable/floating-panel API。因此拖动限定在插件面板组件内，位置由 `apply` 作用域的临时状态持有；未来宿主提供公共能力时再替换。
+
 ## 8. Issue #2 主题与对比度规格
 
 - 所有文字、背景、边框、焦点、按钮、标签和状态色使用 DeepSeek Harness 提供的语义 token。

@@ -26,6 +26,8 @@ export async function loadClientBundle(root, fixture) {
   const previous = {
     window: globalThis.window,
     localStorage: globalThis.localStorage,
+    addEventListener: globalThis.addEventListener,
+    removeEventListener: globalThis.removeEventListener,
   }
   const readKeys = []
   const writtenKeys = []
@@ -35,6 +37,8 @@ export async function loadClientBundle(root, fixture) {
   ])
 
   globalThis.window = globalThis
+  globalThis.addEventListener = () => {}
+  globalThis.removeEventListener = () => {}
   globalThis.localStorage = {
     getItem(key) {
       readKeys.push(key)
@@ -165,6 +169,10 @@ export async function loadClientBundle(root, fixture) {
       else globalThis.window = previous.window
       if (previous.localStorage === undefined) delete globalThis.localStorage
       else globalThis.localStorage = previous.localStorage
+      if (previous.addEventListener === undefined) delete globalThis.addEventListener
+      else globalThis.addEventListener = previous.addEventListener
+      if (previous.removeEventListener === undefined) delete globalThis.removeEventListener
+      else globalThis.removeEventListener = previous.removeEventListener
     },
   }
 }

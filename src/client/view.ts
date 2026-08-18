@@ -9,14 +9,16 @@ import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
 import type { BudgetState, DeepreadResult, Depth, EstimateModes, EstimateRow, ExportFormat, HistoryRecord, SubmitDeepread, UnknownRecord } from './models.js'
 import { errorMessage, isBudgetSuccess, isRecord } from './models.js'
 import { historyKindAllowed, readCalibration, readHistory, writeCalibration, writeHistory } from './storage.js'
+import type { PanelPosition, PanelState } from './store.js'
 
 interface ComposerInjected {
-  readonly hooks: { readonly panelState: ObservableSnapshot<{ readonly open: boolean }> }
+  readonly hooks: { readonly panelState: ObservableSnapshot<PanelState> }
   readonly togglePanel: () => void
 }
 
 interface PanelInjected extends ComposerInjected {
   readonly closePanel: () => void
+  readonly setPanelPosition: (position: PanelPosition) => void
   readonly submitDeepread: SubmitDeepread
 }
 
@@ -83,7 +85,8 @@ export type PanelProps = PropsRuntime<'shell.overlay'>
       '.dr-composer-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; min-height: 30px; flex-shrink: 0; background: none; border: 1px solid transparent; border-radius: 8px; cursor: pointer; color: var(--dsw-alias-label-secondary); font-size: 14px; }',
       '.dr-composer-btn:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l1); }',
       '.dr-panel { pointer-events: auto; position: fixed; top: 56px; right: 16px; width: 420px; max-width: calc(100vw - 32px); max-height: 86vh; overflow-y: auto; z-index: 200; display: flex; flex-direction: column; gap: 8px; background: var(--dsw-alias-bg-overlay); border: 1px solid var(--dsw-alias-border-l1); border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18); padding: 12px; font-size: 13px; color: var(--dsw-alias-label-primary); }',
-      '.dr-panel-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }',
+      '.dr-panel-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; cursor: grab; touch-action: none; user-select: none; }',
+      '.dr-panel-dragging .dr-panel-head { cursor: grabbing; }',
       '.dr-close { background: none; border: none; cursor: pointer; color: var(--dsw-alias-label-secondary); font-size: 14px; padding: 2px 6px; border-radius: 6px; }',
       '.dr-close:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); }',
       '.dr-input { width: 100%; box-sizing: border-box; background: var(--dsw-alias-bg-base); border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; color: var(--dsw-alias-label-primary); font-size: 12px; padding: 7px 9px; }',
@@ -571,6 +574,7 @@ export type PanelProps = PropsRuntime<'shell.overlay'>
 
     export function Panel(props: PanelProps): React.ReactElement | null {
       const open = props.usePanelState((state) => state.open)
+      const position = props.usePanelState((state) => state.position)
       const [url, setUrl] = React.useState('')
       const [text, setText] = React.useState('')
       const [path, setPath] = React.useState('')
@@ -582,7 +586,100 @@ export type PanelProps = PropsRuntime<'shell.overlay'>
       const [history, setHistory] = React.useState<HistoryRecord[]>([])
       // 预算预检结果：{ status: 'idle'|'loading'|'done'|'error', line, data }；面板内直接展示，不跳对话。
       const [budget, setBudget] = React.useState<BudgetState | null>(null)
+      const [dragging, setDragging] = React.useState(false)
       const panelRef = React.useRef<HTMLDivElement | null>(null)
+      const headerRef = React.useRef<HTMLDivElement | null>(null)
+      const dragRef = React.useRef<{
+        pointerId: number
+        startX: number
+        startY: number
+        originLeft: number
+        originTop: number
+        captureTarget: HTMLDivElement
+      } | null>(null)
+
+      const clampPosition = (left: number, top: number, panelWidth: number, headerHeight: number): PanelPosition => ({
+        left: Math.min(Math.max(left, 0), Math.max(window.innerWidth - panelWidth, 0)),
+        top: Math.min(Math.max(top, 0), Math.max(window.innerHeight - headerHeight, 0)),
+      })
+
+      const finishDrag = (event: React.PointerEvent<HTMLDivElement>, releaseCapture: boolean): void => {
+        const active = dragRef.current
+        if (active === null || active.pointerId !== event.pointerId) return
+        dragRef.current = null
+        setDragging(false)
+        if (releaseCapture && event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+      }
+
+      const releaseActiveDrag = (): boolean => {
+        const active = dragRef.current
+        dragRef.current = null
+        if (active === null) return false
+        if (active.captureTarget.hasPointerCapture(active.pointerId)) {
+          active.captureTarget.releasePointerCapture(active.pointerId)
+        }
+        return true
+      }
+
+      const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+        if (dragRef.current !== null) return
+        if (event.pointerType === 'mouse' && event.button !== 0) return
+        const interactive = (event.target as { closest?: (selector: string) => Element | null } | null)
+          ?.closest?.('button, a, input, textarea, select, [role="button"], [contenteditable="true"]')
+        if (interactive !== null && interactive !== undefined) return
+        const panel = panelRef.current
+        const header = headerRef.current
+        if (panel === null || header === null) return
+        const panelRect = panel.getBoundingClientRect()
+        event.preventDefault()
+        event.currentTarget.setPointerCapture(event.pointerId)
+        dragRef.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          originLeft: panelRect.left,
+          originTop: panelRect.top,
+          captureTarget: event.currentTarget,
+        }
+        setDragging(true)
+      }
+
+      const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+        const active = dragRef.current
+        if (active === null || active.pointerId !== event.pointerId) return
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+        const panel = panelRef.current
+        const header = headerRef.current
+        if (panel === null || header === null) return
+        props.setPanelPosition(clampPosition(
+          active.originLeft + event.clientX - active.startX,
+          active.originTop + event.clientY - active.startY,
+          panel.getBoundingClientRect().width,
+          header.getBoundingClientRect().height,
+        ))
+      }
+
+      React.useEffect(() => {
+        if (!open) return
+        const onResize = (): void => {
+          const panel = panelRef.current
+          const header = headerRef.current
+          if (panel === null || header === null) return
+          const panelRect = panel.getBoundingClientRect()
+          const next = clampPosition(panelRect.left, panelRect.top, panelRect.width, header.getBoundingClientRect().height)
+          if (next.left !== panelRect.left || next.top !== panelRect.top) props.setPanelPosition(next)
+        }
+        window.addEventListener('resize', onResize)
+        return () => { window.removeEventListener('resize', onResize) }
+      }, [open, props.setPanelPosition])
+
+      React.useEffect(() => {
+        if (!open && releaseActiveDrag()) setDragging(false)
+      }, [open])
+
+      React.useEffect(() => () => { releaseActiveDrag() }, [])
 
       React.useEffect(() => {
         if (open) setHistory(readHistory().slice(0, 8))
@@ -721,8 +818,21 @@ export type PanelProps = PropsRuntime<'shell.overlay'>
         budgetCls += ' dr-budget-result'
       }
 
-      return React.createElement('div', { id: 'deepread-panel', className: 'dr-panel', ref: panelRef },
-        React.createElement('div', { className: 'dr-panel-head' },
+      return React.createElement('div', {
+        id: 'deepread-panel',
+        className: 'dr-panel' + (dragging ? ' dr-panel-dragging' : ''),
+        ref: panelRef,
+        style: position === null ? undefined : { left: position.left, top: position.top, right: 'auto' },
+      },
+        React.createElement('div', {
+          className: 'dr-panel-head',
+          ref: headerRef,
+          onPointerDown,
+          onPointerMove,
+          onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => { finishDrag(event, true) },
+          onPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => { finishDrag(event, true) },
+          onLostPointerCapture: (event: React.PointerEvent<HTMLDivElement>) => { finishDrag(event, false) },
+        },
           React.createElement('span', null, '📖 精读助手'),
           React.createElement('button', { type: 'button', className: 'dr-close', title: '关闭精读助手', 'aria-label': '关闭精读助手', onClick: props.togglePanel }, '✕'),
         ),

@@ -59,8 +59,19 @@ function findElements(element, predicate, matches = []) {
 
 const previousDocument = globalThis.document
 const previousWindow = globalThis.window
+const previousAddEventListener = globalThis.addEventListener
+const previousRemoveEventListener = globalThis.removeEventListener
+const windowListeners = new Map()
 globalThis.document = documentStub
 globalThis.window = globalThis
+globalThis.addEventListener = (type, listener) => {
+  const listeners = windowListeners.get(type) ?? new Set()
+  listeners.add(listener)
+  windowListeners.set(type, listeners)
+}
+globalThis.removeEventListener = (type, listener) => {
+  windowListeners.get(type)?.delete(listener)
+}
 const { ClientModuleSystem } = await import(pathToFileURL(upstreamSystem).href)
 const system = new ClientModuleSystem({
   modules: [{ id: 'dsh-deepread', url: pathToFileURL(join(root, 'lib', 'client.js')).href, rev: 'test' }],
@@ -220,6 +231,10 @@ try {
   else globalThis.document = previousDocument
   if (previousWindow === undefined) delete globalThis.window
   else globalThis.window = previousWindow
+  if (previousAddEventListener === undefined) delete globalThis.addEventListener
+  else globalThis.addEventListener = previousAddEventListener
+  if (previousRemoveEventListener === undefined) delete globalThis.removeEventListener
+  else globalThis.removeEventListener = previousRemoveEventListener
 }
 
 console.log('CLIENT LIFECYCLE: loader toggle, aria, single panel, native keyboard semantics, remount, subscriptions, and style dispose cleanly')

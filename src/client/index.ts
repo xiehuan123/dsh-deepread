@@ -43,6 +43,7 @@ export function apply(ctx: ClientContext): void {
       inject: () => ({
         ...panelFace,
         closePanel: panelState.actions.closePanel,
+        setPanelPosition: panelState.actions.setPanelPosition,
         submitDeepread,
       }),
     }, Panel)
