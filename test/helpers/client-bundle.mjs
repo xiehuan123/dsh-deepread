@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
+import { createEffectContext, createRuntimeStub, createSlotHarness } from './client-runtime.mjs'
 
 function childrenOf(element) {
   if (element === null || element === undefined || typeof element !== 'object') return []
@@ -79,27 +80,35 @@ export async function loadClientBundle(root, fixture) {
   }
   const module = handoff.factory((specifier) => {
     if (specifier === 'react') return React
+    if (specifier === '@deepseek-ai/dsh-client-runtime/client') return createRuntimeStub()
     throw new Error(`unexpected client dependency: ${specifier}`)
   })
 
-  const components = {}
-  const ctx = {
-    get(name) {
-      if (name !== 'slots') return undefined
-      return {
-        inject(slot, provider) { provider() },
-        register(meta, component) { components[meta.name] = component; return () => {} },
-      }
+  const harness = createSlotHarness()
+  let draft = ''
+  const submissions = []
+  const ctx = createEffectContext({
+    slots: harness.slots,
+    sessions: {
+      list: { getSnapshot: () => ({ current: 'session-test' }) },
+      scope: () => ({}),
     },
-  }
+    conversation: {
+      input: {
+        for: () => ({
+          setDraft(value) { draft = value },
+          submit() { submissions.push(draft) },
+        }),
+      },
+    },
+  })
   module.apply(ctx)
 
   const composerHooks = []
   const panelHooks = []
   const historyItemHooks = []
-  const submissions = []
-  const composerWrapper = components['conversation.input.left']
-  const panelWrapper = components['shell.overlay']
+  const composerWrapper = harness.registrations.get('conversation.input.left')
+  const panelWrapper = harness.registrations.get('shell.overlay')
   if (typeof composerWrapper !== 'function' || typeof panelWrapper !== 'function') {
     throw new Error('client bundle did not register its public composer and overlay slots')
   }
@@ -119,10 +128,10 @@ export async function loadClientBundle(root, fixture) {
       button.props.onClick()
     },
     renderPanel() {
-      return renderFunctionElement(panelWrapper({ submitDeepread: (instruction) => { submissions.push(instruction); return null } }), panelHooks)
+      return renderFunctionElement(panelWrapper(), panelHooks)
     },
     rereadFirstHistoryItemAndSubmit() {
-      let panel = renderFunctionElement(panelWrapper({ submitDeepread: (instruction) => { submissions.push(instruction); return null } }), panelHooks)
+      let panel = renderFunctionElement(panelWrapper(), panelHooks)
       const item = findElement(panel, (element) => typeof element.type === 'function' && element.props?.item !== undefined)
       if (item === null) throw new Error('deepread panel history item was not rendered')
       let renderedItem = renderFunctionElement(item, historyItemHooks)
@@ -133,7 +142,7 @@ export async function loadClientBundle(root, fixture) {
       const reread = findElement(renderedItem, (element) => element.props?.className === 'dr-history-reread')
       if (reread === null) throw new Error('deepread history reread action was not rendered')
       reread.props.onClick()
-      panel = renderFunctionElement(panelWrapper({ submitDeepread: (instruction) => { submissions.push(instruction); return null } }), panelHooks)
+      panel = renderFunctionElement(panelWrapper(), panelHooks)
       const submit = findElement(panel, (element) => element.props?.className === 'dr-submit')
       if (submit === null) throw new Error('deepread panel submit action was not rendered')
       submit.props.onClick()
@@ -150,6 +159,7 @@ export async function loadClientBundle(root, fixture) {
       return budget.props.children.join('')
     },
     cleanup() {
+      ctx.dispose()
       delete globalThis.__ModuleLoader__
       if (previous.window === undefined) delete globalThis.window
       else globalThis.window = previous.window

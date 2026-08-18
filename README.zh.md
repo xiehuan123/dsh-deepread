@@ -132,8 +132,8 @@ npx skills@latest add xiehuan123/dsh-deepread      # 或 skills.sh
 ├── package.json            # dsh.bundle + dsh.client + dsh.skills
 ├── cordis.patch.yml        # insert 挂载自身
 ├── index.mjs               # Node half：Cordis entry（deepread 工具 + PDF/HTML 解析 + 三格式导出）
-├── src/client/index.js     # Client source：结果卡片 + 输入区精读条 + 精读面板（工厂包体）
-├── scripts/build-client.mjs# 将 client source 打包为 C6 工厂包产物 lib/client.js（勿手改）
+├── src/client/**/*.ts      # Client 类型模型、存储、store、视图与 slot 入口
+├── tsdown.config.ts        # 按官方 lazy-CJS 模块语义生成 lib/client.js
 ├── lib/client.js           # Client half（生成产物）：__ModuleLoader__.load({ id, factory })
 ├── test/                   # 冒烟测试：Node 工具链路 + client 工厂包契约
 ├── skills/dsh-deepread/    # Codex / Claude Code 兼容 skill（SKILL.md + references + agents/openai.yaml）
@@ -174,7 +174,7 @@ URL 抓取的全文按官方 storageDomain 约定落盘：`deepread_url_cache` �
 维护宿主集成前先阅读 [DeepSeek Harness 插件集成参考](docs/deepseek-harness-integration.md)，其中记录了 profile 装载、Node/Browser 双入口、slot 生命周期、主题规则和排障顺序。
 
 ```sh
-npm run build:client   # 从 src/client/index.js 重新生成 lib/client.js
+npm run build:client   # 从 src/client/**/*.ts 重新生成 lib/client.js
 npm test               # Node 工具链路冒烟 + client 工厂包契约测试
 ```
 

@@ -35,9 +35,16 @@ try {
     'lib/types/index.js',
     'lib/types/index.d.ts',
     'lib/client.js',
+    'lib/client.js.map',
+    'src/client/index.ts',
+    'src/client/models.ts',
+    'src/client/storage.ts',
+    'src/client/store.ts',
+    'src/client/view.ts',
   ]) {
     assert.ok(files.includes(expected), `npm tarball includes ${expected}`)
   }
+  assert.ok(!files.includes('src/client/index.js'), 'npm tarball excludes the retired JavaScript client source')
 
   const { stdout: manifestSource } = await execFileAsync('tar', [
     '-xOf', archive, 'package/dsh-plugin.json',

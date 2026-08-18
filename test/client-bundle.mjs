@@ -5,11 +5,12 @@ import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import assert from 'node:assert'
+import { createEffectContext, createRuntimeStub, createSlotHarness } from './helpers/client-runtime.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 
-// 从源码重建产物：保证测试验证的正是 src 与脚本生成的 lib/client.js。
-execFileSync(process.execPath, [join(root, 'scripts/build-client.mjs')], { stdio: 'pipe' })
+// 从源码重建产物：保证测试验证的正是 TS 源与 tsdown 生成的 lib/client.js。
+execFileSync('npm', ['run', 'build:client'], { cwd: root, stdio: 'pipe' })
 const bundlePath = join(root, 'lib/client.js')
 
 globalThis.window = globalThis
@@ -28,6 +29,7 @@ const reactStub = {
 }
 const requireStub = (spec) => {
   if (spec === 'react') return reactStub
+  if (spec === '@deepseek-ai/dsh-client-runtime/client') return createRuntimeStub()
   throw new Error('client bundle required an unexpected specifier: ' + spec)
 }
 const mod = handoff.factory(requireStub)
@@ -35,27 +37,22 @@ assert.equal(typeof mod.apply, 'function', 'factory exports apply')
 assert.deepEqual(mod.inject, ['slots', 'sessions', 'conversation'], 'factory exports inject')
 
 const slotNames = []
-const components = {}
-const fakeCtx = {
-  get: (name) => {
-    if (name === 'slots') {
-      return {
-        inject: (slot, provider) => { slotNames.push(slot); provider() },
-        register: (meta, component) => { components[meta.name] = component },
-      }
-    }
-    return undefined
-  },
-}
+const harness = createSlotHarness()
+const inject = harness.slots.inject
+harness.slots.inject = (slot, provider) => { slotNames.push(slot); return inject(slot, provider) }
+const fakeCtx = createEffectContext({
+  slots: harness.slots,
+  sessions: { list: { getSnapshot: () => ({ current: undefined }) } },
+  conversation: { input: { for() { throw new Error('not used') } } },
+})
 mod.apply(fakeCtx)
-assert.deepEqual(slotNames, ['tool.call.toolview', 'conversation.input.left', 'shell.overlay'])
+assert.deepEqual(slotNames, ['shell.overlay', 'conversation.input.left', 'tool.call.toolview'])
 
-const view = components['tool.call.toolview']
+const view = harness.registrations.get('tool.call.toolview')
 assert.equal(typeof view, 'function')
 const tree = view({
-  args: { depth: 'deep' },
-  value: { kind: 'article', title: 't', summary: 's', thesis: 'th', arguments: [], quotes: [], concepts: [], questions: [], chapters: [], meta: { chars: 10, depth: 'deep' } },
+  block: { meta: { kind: 'article', title: 't', summary: 's', thesis: 'th', arguments: [], quotes: [], concepts: [], questions: [], chapters: [], meta: { chars: 10, depth: 'deep' } } },
 })
-assert.ok(tree, 'result card renders an element tree')
+assert.ok(tree.type(tree.props), 'result card renders an element tree')
 
 console.log('CLIENT BUNDLE OK: C6 handoff + apply/inject exports + slot registrations')

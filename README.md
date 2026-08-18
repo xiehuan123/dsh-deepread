@@ -154,8 +154,8 @@ Quickly summarize this article: <paste text>
 ├── package.json            # dsh.bundle + dsh.client + dsh.skills
 ├── cordis.patch.yml        # inserts itself into the composition
 ├── index.mjs               # Node half: Cordis entry (deepread tool + PDF/HTML parsing + three export formats)
-├── src/client/index.js     # Client source: result card + reading bar + reading panel (factory bundle)
-├── scripts/build-client.mjs# bundles client source into the C6 factory artifact lib/client.js (do not edit by hand)
+├── src/client/**/*.ts      # Typed client models, storage, store, views, and slot entry
+├── tsdown.config.ts        # official lazy-CJS module build semantics for lib/client.js
 ├── lib/client.js           # Client half (generated): __ModuleLoader__.load({ id, factory })
 ├── test/                   # smoke tests: Node tool pipeline + client factory-bundle contract
 ├── assets/                 # README and showcase visuals
@@ -202,7 +202,7 @@ supported activation environment.
 Before maintaining the host integration, read the [DeepSeek Harness plugin integration reference](docs/deepseek-harness-integration.md). It records profile loading, the Node/browser entry points, slot lifecycle, theme rules, and the diagnostic order.
 
 ```sh
-npm run build:client   # regenerate lib/client.js from src/client/index.js
+npm run build:client   # regenerate lib/client.js from src/client/**/*.ts
 npm test               # Node tool pipeline smoke + client factory-bundle contract tests
 ```
 

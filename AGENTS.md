@@ -11,7 +11,7 @@ This repository is an out-of-tree plugin for DeepSeek Harness. Before changing p
 ## Plugin identities and source files
 
 - Keep these identities distinct: npm/client-module id `dsh-deepread`, Cordis plugin name and tool name `deepread`, and patch row id `deepread`.
-- `src/index.ts` and `src/host/**/*.ts` are the Node-half sources. `src/client/index.js` is the browser-half source. `lib/types/**/*.js`, `lib/types/**/*.d.ts`, and `lib/client.js` are generated; never edit them directly.
+- `src/index.ts` and `src/host/**/*.ts` are the Node-half sources. `src/client/**/*.ts` are the browser-half sources. `lib/types/**/*.js`, `lib/types/**/*.d.ts`, and `lib/client.js` are generated; never edit them directly.
 - `package.json` owns `dsh.bundle`, `dsh.client`, `dsh.skills`, exports, dependencies, and packed files. `cordis.patch.yml` only mounts the Node half.
 - `.codex-plugin/`, `.claude-plugin/`, and root `plugin.json` are host metadata. They do not install or activate the DeepSeek Harness profile bundle.
 

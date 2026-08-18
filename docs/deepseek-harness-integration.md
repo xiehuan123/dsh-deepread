@@ -95,7 +95,7 @@ Harness 依次应用：
 
 ## Browser half
 
-浏览器源码是 [`src/client/index.js`](../src/client/index.js)，[`scripts/build-client.mjs`](../scripts/build-client.mjs) 把它包装成 C6 factory bundle：
+浏览器入口是 [`src/client/index.ts`](../src/client/index.ts)，领域模型、localStorage 边界、面板 store 与视图分别位于同目录模块。[`tsdown.config.ts`](../tsdown.config.ts) 使用上游当前 `clientBundle` 相同的 browser/CJS 与 banner/intro/footer 语义生成 C6 factory bundle：
 
 ```js
 window.__ModuleLoader__.load({
@@ -106,15 +106,15 @@ window.__ModuleLoader__.load({
 
 宿主按 `dsh.client` 扫描包，解析 `exports["./client"]`，读取 bundle 内容计算 rev，并通过 `/plugins/<id>/client.js?rev=<hash>` 提供文件。bundle 必须在执行后注册与图中完全相同的 id；缺文件、id 不匹配、重复注册或 factory 内 `require()` 未进入宿主模块表都会响亮失败。
 
-`lib/client.js` 属于产物面，不能手改。浏览器修改流程固定为：
+`lib/client.js` 与 `lib/client.js.map` 属于产物面，不能手改。浏览器修改流程固定为：
 
-1. 修改 `src/client/index.js`；
+1. 修改 `src/client/**/*.ts`；
 2. 运行 `npm run build:client`；
-3. 检查并提交 `lib/client.js`；
+3. 检查并提交 `lib/client.js` 与 sourcemap；
 4. 运行 `npm test`；
 5. 对装载或 UI 生命周期变化，在真实 Harness Web profile 中验证。
 
-当前构建脚本自行生成与上游 C6 同构的 wrapper，没有直接复用上游 TypeScript/tsdown pipeline。因此升级 Harness 时必须重新核对 `ClientPluginHandoff` 和 factory `require` 规则；本地测试只能证明当前约定，没有给未来宿主版本提供兼容保证。
+上游的 `clientBundle` 预设没有作为已发布包暴露；上游文档明确要求 out-of-tree 插件自行复刻该构建。这里由 tsdown 负责模块转换和 factory 产物生成，不再把 JavaScript 源文本手工拼进 loader wrapper。升级 Harness 时仍须重新核对 `packages/client/tsdown.client.ts`、`ClientPluginHandoff` 和 factory `require` 规则。
 
 ## 三个 UI slot
 
@@ -224,10 +224,10 @@ dsh --profile web --dump-config
 以下是升级或处理相关 issue 时应优先复核的点，不代表它们现在一定导致故障：
 
 1. **Web-only 激活**：`webServer` 是 Node 硬依赖；stock headless 兼容性尚未成立。
-2. **自定义 C6 构建器**：输出与当前宿主同构，但上游协议变化不会由类型系统提示。
-3. **模块级面板 store**：当前 `src/client/index.js` 使用模块级可订阅对象共享开关状态；上游现行规则倾向由 slot registration 声明 store factory，升级 slot/store 体系时应迁移并增加卸载测试。
+2. **out-of-tree tsdown 配置**：上游 preset 未发布，因此本仓库镜像其构建语义；协议变化仍需主动对照上游更新。
+3. **面板 store 归属**：面板状态由 `shell.overlay` 注册项的官方 store seat 持有；组件只消费框架提供的 `useStore/actions`，声明折叠或插件卸载时由 slot 生命周期释放实例。
 4. **样式实现偏差**：当前 bundle 注入全局 CSS，且置信度标签存在字面颜色；上游现行功能组件标准是 CSS Modules + semantic tokens。暗黑模式工作应借机缩小该偏差。
-5. **集成测试缺口**：`test/client-bundle.mjs` 验证注册形状，但没有跑真实 `ClientModuleSystem`、slot declaration collapse、HMR 和视觉主题。
+5. **集成测试边界**：`test/client-lifecycle.mjs` 在可用的上游构建上运行真实 `ClientModuleSystem` 并验证 slot/store/style 释放；完整 HMR 与视觉主题仍需在实际浏览器 profile 中复核。
 
 ## 上游事实来源
 

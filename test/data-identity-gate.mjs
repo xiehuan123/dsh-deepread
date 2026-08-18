@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 
 const cache = await readFile(new URL('../src/host/cache.ts', import.meta.url), 'utf8')
 const stats = await readFile(new URL('../src/host/calibration.ts', import.meta.url), 'utf8')
-const client = await readFile(new URL('../src/client/index.js', import.meta.url), 'utf8')
+const client = await readFile(new URL('../src/client/storage.ts', import.meta.url), 'utf8')
 
 assert.match(cache, /name: 'deepread_url_cache',[\s\S]*?version: 1,[\s\S]*?tables: \{ articles:/)
 assert.match(stats, /name: 'deepread_stats',[\s\S]*?version: 1,[\s\S]*?tables: \{ stats:/)

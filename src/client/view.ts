@@ -1,8 +1,27 @@
-// DeepRead 精读助手 — client source。由 scripts/build-client.mjs 打包成 C6 工厂包
+// DeepRead 精读助手 — client view。由 tsdown 打包成 C6 工厂包
 // （window.__ModuleLoader__.load({ id, factory }) 形态），产物 lib/client.js 勿手改。
 // 注册：deepread 工具结果卡片（tool.call.toolview）
 // + 输入区左侧 📖 按钮（conversation.input.left）+ 卡片式精读面板（shell.overlay）。
-const React = require("react")
+import * as React from 'react'
+import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
+import type { InjectFace, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { BudgetState, DeepreadResult, Depth, EstimateModes, EstimateRow, ExportFormat, HistoryRecord, SubmitDeepread, UnknownRecord } from './models.js'
+import { errorMessage, isBudgetSuccess, isRecord } from './models.js'
+import { historyKindAllowed, readCalibration, readHistory, writeCalibration, writeHistory } from './storage.js'
+import type { createPanelStore } from './store.js'
+
+interface ComposerInjected {
+  readonly openPanel: () => void
+}
+
+interface PanelInjected {
+  readonly submitDeepread: SubmitDeepread
+}
+
+export type ComposerButtonProps = PropsRuntime<'conversation.input.left'> & InjectFace<ComposerInjected>
+export type PanelProps = PropsRuntime<'shell.overlay'>
+  & PropsStore<ReturnType<typeof createPanelStore>>
+  & InjectFace<PanelInjected>
 
     const CSS = [
       '.dr-card { font-size: 13px; line-height: 1.6; }',
@@ -91,7 +110,7 @@ const React = require("react")
       '.dr-history-reread { background: none; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; padding: 2px 10px; cursor: pointer; color: var(--dsw-alias-brand-primary); font-size: 12px; margin-top: 6px; }',
       '.dr-history-reread:hover { border-color: var(--dsw-alias-brand-primary); }',
     ].join('\n')
-    function injectCss(css) {
+    function injectCss(css: string): () => void {
       if (typeof document === 'undefined') return () => {}
       const el = document.createElement('style')
       el.setAttribute('data-plugin', 'dsh-deepread')
@@ -100,10 +119,10 @@ const React = require("react")
       return () => { if (el.parentNode !== null) el.parentNode.removeChild(el) }
     }
 
-    const DEPTH_LABELS = { quick: '快速要点', deep: '深度精读', book: '全书精读', map: '知识地图', feynman: '费曼读书法' }
-    const KIND_LABELS = { url: '网页', pdf: 'PDF', file: '文件', text: '粘贴文本' }
+    const DEPTH_LABELS: Readonly<Record<string, string>> = { quick: '快速要点', deep: '深度精读', book: '全书精读', map: '知识地图', feynman: '费曼读书法' }
+    const KIND_LABELS: Readonly<Record<string, string>> = { url: '网页', pdf: 'PDF', file: '文件', text: '粘贴文本' }
     const TYPE_ORDER = ['核心结论', '分论点', '原因或作用机制', '事实', '数据', '案例', '隐含前提', '反对意见', '限制条件', '可执行建议']
-    const CONF_CLASS = { '作者原意': 'dr-conf-author', '原文事实与数据': 'dr-conf-fact', '合理推断': 'dr-conf-infer', '无法确认': 'dr-conf-unknown' }
+    const CONF_CLASS: Readonly<Record<string, string>> = { '作者原意': 'dr-conf-author', '原文事实与数据': 'dr-conf-fact', '合理推断': 'dr-conf-infer', '无法确认': 'dr-conf-unknown' }
     const CONF_ORDER = ['作者原意', '原文事实与数据', '合理推断', '无法确认']
 
     // ---------- 预算估算（镜像 host buildEstimate，纯客户端即时预览） ----------
@@ -111,9 +130,8 @@ const React = require("react")
     const EST_CHUNK_CHARS = 6000
     const EST_MAX_PARTS = 20
     const EST_MAX_INPUT_CHARS = 400000
-    const CALIB_KEY = 'dsh-deepread-calib'
 
-    function estimateTokens(text) {
+    function estimateTokens(text: string): number {
       let cjk = 0
       let latin = 0
       let other = 0
@@ -126,15 +144,15 @@ const React = require("react")
       return Math.ceil(cjk * 0.6 + latin * 0.25 + other * 0.5)
     }
 
-    function estimateCall(calls, inputTokens, outputTokens, rate, latency) {
+    function estimateCall(calls: number, inputTokens: number, outputTokens: number, rate: number, latency: number): EstimateRow {
       const totalTokens = inputTokens + outputTokens
       const minutes = Math.round(((totalTokens / rate / 60) + (calls * latency / 60000)) * 10) / 10
       return { calls: calls, inputTokens: inputTokens, outputTokens: outputTokens, totalTokens: totalTokens, minutes: minutes }
     }
 
-    function estimateModes(text, rate, latency) {
+    function estimateModes(text: string, rate: number, latency: number): EstimateModes {
       const chars = text.length
-      const tokOf = (len) => estimateTokens(text.slice(0, len))
+      const tokOf = (len: number) => estimateTokens(text.slice(0, len))
       const effectiveLen = chars > EST_MAX_INPUT_CHARS ? EST_MAX_INPUT_CHARS : chars
       const parts = Math.min(Math.ceil(effectiveLen / EST_CHUNK_CHARS), EST_MAX_PARTS)
       const perInput = tokOf(effectiveLen > EST_CHUNK_CHARS ? EST_CHUNK_CHARS : effectiveLen) + EST_PROMPT_OVERHEAD
@@ -154,7 +172,7 @@ const React = require("react")
       return { quick: quick, deep: deep, book: book, map: map, feynman: feynman }
     }
 
-    function formatTokens(n) {
+    function formatTokens(n: number): string {
       if (typeof n !== 'number' || !isFinite(n)) return '≈? token'
       if (n >= 1000) {
         const k = Math.round(n / 100) / 10
@@ -163,7 +181,7 @@ const React = require("react")
       return '≈' + n + ' token'
     }
 
-    function formatMinutes(m) {
+    function formatMinutes(m: number): string {
       if (typeof m !== 'number' || !isFinite(m)) return '≈?分钟'
       if (m < 1) return '≈<1分钟'
       if (m >= 60) {
@@ -173,37 +191,14 @@ const React = require("react")
       return '≈' + m + '分钟'
     }
 
-    function readCalibration() {
-      if (typeof localStorage === 'undefined') return { rate: 30, latency: 800 }
-      try {
-        const raw = localStorage.getItem(CALIB_KEY)
-        if (raw === null || raw === '') return { rate: 30, latency: 800 }
-        const parsed = JSON.parse(raw)
-        const rate = parsed !== null && typeof parsed === 'object' && typeof parsed.rate === 'number' && isFinite(parsed.rate) && parsed.rate > 0 ? parsed.rate : 30
-        const latency = parsed !== null && typeof parsed === 'object' && typeof parsed.latency === 'number' && isFinite(parsed.latency) && parsed.latency > 0 ? parsed.latency : 800
-        return { rate: rate, latency: latency }
-      } catch (err) {
-        return { rate: 30, latency: 800 }
-      }
-    }
-
-    function writeCalibration(rate, latency) {
-      if (typeof localStorage === 'undefined') return
-      try {
-        localStorage.setItem(CALIB_KEY, JSON.stringify({ rate: rate, latency: latency }))
-      } catch (err) {
-        // localStorage 不可用或写入失败：静默忽略
-      }
-    }
-
-    function badge(text) {
+    function badge(text: React.ReactNode): React.ReactElement {
       return React.createElement('span', { className: 'dr-badge' }, text)
     }
-    function tag(text, cls) {
+    function tag(text: React.ReactNode, cls?: string): React.ReactElement {
       return React.createElement('span', { className: 'dr-tag' + (cls !== undefined ? ' ' + cls : '') }, text)
     }
 
-    function Section(props) {
+    function Section(props: { readonly title: React.ReactNode; readonly count?: number; readonly defaultOpen?: boolean; readonly children?: React.ReactNode }): React.ReactElement {
       const [open, setOpen] = React.useState(props.defaultOpen !== false)
       return React.createElement('div', { className: 'dr-section' },
         React.createElement('button', { type: 'button', className: 'dr-section-head', onClick: () => setOpen(!open) },
@@ -215,18 +210,19 @@ const React = require("react")
       )
     }
 
-    function Header(props) {
+    function Header(props: { readonly value: DeepreadResult }): React.ReactElement {
       const v = props.value
       const meta = v.meta !== null && typeof v.meta === 'object' ? v.meta : {}
       const isMap = v.kind === 'map'
-      const depthLabel = DEPTH_LABELS[meta.depth] !== undefined ? DEPTH_LABELS[meta.depth] : '精读'
-      const kindLabel = KIND_LABELS[meta.sourceKind] !== undefined ? KIND_LABELS[meta.sourceKind] : null
-      const files = meta.files !== null && typeof meta.files === 'object' ? meta.files : null
+      const depthLabel = typeof meta.depth === 'string' ? (DEPTH_LABELS[meta.depth] ?? '精读') : '精读'
+      const kindLabel = typeof meta.sourceKind === 'string' ? (KIND_LABELS[meta.sourceKind] ?? null) : null
+      const files = isRecord(meta.files) ? meta.files : null
       let estBadge = null
-      const est = meta.estimate !== null && typeof meta.estimate === 'object' && Array.isArray(meta.estimate.modes) ? meta.estimate : null
+      const est = isRecord(meta.estimate) && Array.isArray(meta.estimate.modes) ? meta.estimate : null
       if (est !== null) {
-        const row = est.modes.find((mm) => mm !== null && typeof mm === 'object' && mm.mode === meta.depth) || null
-        if (row !== null && typeof row.calls === 'number') estBadge = '预算 ≈ ' + row.totalTokens + ' token · ' + row.minutes + ' 分钟'
+        const modes: readonly unknown[] = Array.isArray(est.modes) ? est.modes : []
+        const row = modes.find((candidate) => isRecord(candidate) && candidate.mode === meta.depth)
+        if (isRecord(row) && typeof row.calls === 'number') estBadge = '预算 ≈ ' + String(row.totalTokens) + ' token · ' + String(row.minutes) + ' 分钟'
       }
       return React.createElement('div', { className: 'dr-head' },
         React.createElement('div', { className: 'dr-title' }, (isMap ? '🗺️' : '📖') + ' ' + (typeof v.title === 'string' && v.title !== '' ? v.title : (isMap ? '知识地图' : '精读报告'))),
@@ -242,9 +238,9 @@ const React = require("react")
       )
     }
 
-    function MapItemRow(o, i) {
+    function MapItemRow(o: UnknownRecord, i: number): React.ReactElement {
       const evidence = typeof o.evidence === 'string' ? o.evidence : ''
-      const relations = Array.isArray(o.relations) ? o.relations : []
+      const relations: readonly unknown[] = Array.isArray(o.relations) ? o.relations : []
       const conf = typeof o.confidence === 'string' ? o.confidence : ''
       return React.createElement('div', { className: 'dr-map-item', key: 'mi-' + i },
         React.createElement('div', { className: 'dr-map-claim' }, (i + 1) + '. ' + (typeof o.claim === 'string' ? o.claim : '')),
@@ -254,14 +250,14 @@ const React = require("react")
           conf !== '' ? tag(conf, CONF_CLASS[conf]) : null,
         ) : null,
         relations.map((r, ri) => {
-          const ro = r !== null && typeof r === 'object' ? r : { type: String(r) }
+          const ro = isRecord(r) ? r : { type: String(r) }
           if (typeof ro.to !== 'string' || ro.to === '') return null
           return React.createElement('span', { className: 'dr-relation', key: 'rel-' + ri }, '↳ ' + (typeof ro.type === 'string' ? ro.type : '支持') + ' → ' + ro.to)
         }),
       )
     }
 
-    function FeynmanSections(props) {
+    function FeynmanSections(props: { readonly value: DeepreadResult }): React.ReactElement {
       const v = props.value
       const toc = Array.isArray(v.toc) ? v.toc : []
       const questions = Array.isArray(v.questions) ? v.questions : []
@@ -282,12 +278,13 @@ const React = require("react")
         ) : null,
         chapters.map((ch, i) => {
           const o = ch !== null && typeof ch === 'object' ? ch : {}
-          const points = Array.isArray(o.points) ? o.points : []
-          const gaps = Array.isArray(o.gaps) ? o.gaps : []
-          const fixes = Array.isArray(o.corrections) ? o.corrections : []
-          return React.createElement(Section, { title: '第 ' + o.index + ' 章 · ' + (typeof o.title === 'string' ? o.title : ''), count: points.length, defaultOpen: o.index <= 2, key: 'fc-' + i },
+          const points: readonly unknown[] = Array.isArray(o.points) ? o.points : []
+          const gaps: readonly unknown[] = Array.isArray(o.gaps) ? o.gaps : []
+          const fixes: readonly unknown[] = Array.isArray(o.corrections) ? o.corrections : []
+          const chapterIndex = typeof o.index === 'number' ? o.index : i + 1
+          return React.createElement(Section, { title: '第 ' + chapterIndex + ' 章 · ' + (typeof o.title === 'string' ? o.title : ''), count: points.length, defaultOpen: chapterIndex <= 2, key: 'fc-' + i },
             points.length > 0 ? React.createElement('div', null, points.map((p, pi) => {
-              const po = p !== null && typeof p === 'object' ? p : { claim: String(p) }
+              const po = isRecord(p) ? p : { claim: String(p) }
               return React.createElement('div', { className: 'dr-map-item', key: 'fp-' + pi },
                 React.createElement('div', { className: 'dr-map-claim' }, (pi + 1) + '. ' + (typeof po.claim === 'string' ? po.claim : '')),
                 typeof po.data === 'string' && po.data !== '' ? React.createElement('div', { className: 'dr-evidence' }, '数据：' + po.data) : null,
@@ -318,21 +315,21 @@ const React = require("react")
       )
     }
 
-    function Sections(props) {
+    function Sections(props: { readonly value: DeepreadResult }): React.ReactElement {
       const v = props.value !== null && typeof props.value === 'object' ? props.value : {}
       if (v.kind === 'feynman') return React.createElement(FeynmanSections, { value: v })
       if (v.kind === 'map') {
-        const items = Array.isArray(v.items) ? v.items : []
-        const dataPoints = Array.isArray(v.dataPoints) ? v.dataPoints : []
-        const caveats = Array.isArray(v.caveats) ? v.caveats : []
-        const coreConclusions = Array.isArray(v.coreConclusions) ? v.coreConclusions : []
-        const recallQuestions = Array.isArray(v.recallQuestions) ? v.recallQuestions : []
-        const groups = {}
+        const items: readonly unknown[] = Array.isArray(v.items) ? v.items : []
+        const dataPoints: readonly unknown[] = Array.isArray(v.dataPoints) ? v.dataPoints : []
+        const caveats: readonly unknown[] = Array.isArray(v.caveats) ? v.caveats : []
+        const coreConclusions: readonly unknown[] = Array.isArray(v.coreConclusions) ? v.coreConclusions : []
+        const recallQuestions: readonly unknown[] = Array.isArray(v.recallQuestions) ? v.recallQuestions : []
+        const groups: Record<string, UnknownRecord[]> = {}
         for (const it of items) {
-          const o = it !== null && typeof it === 'object' ? it : { claim: String(it) }
+          const o = isRecord(it) ? it : { claim: String(it) }
           const t = typeof o.type === 'string' && o.type !== '' ? o.type : '分论点'
-          if (groups[t] === undefined) groups[t] = []
-          groups[t].push(o)
+          const group = groups[t] ?? (groups[t] = [])
+          group.push(isRecord(o) ? o : { claim: String(o) })
         }
         return React.createElement('div', { className: 'dr-sections' },
           React.createElement(Header, { value: v }),
@@ -357,7 +354,7 @@ const React = require("react")
           }),
           dataPoints.length > 0 ? React.createElement(Section, { title: '关键数据表', count: dataPoints.length, defaultOpen: true },
             React.createElement('div', null, dataPoints.map((d, i) => {
-              const o = d !== null && typeof d === 'object' ? d : { value: String(d) }
+              const o = isRecord(d) ? d : { value: String(d) }
               return React.createElement('div', { className: 'dr-data-row', key: 'dp-' + i },
                 React.createElement('div', { className: 'dr-data-value' }, typeof o.value === 'string' ? o.value : ''),
                 typeof o.period === 'string' && o.period !== '' ? React.createElement('div', { className: 'dr-data-meta' }, '时间：' + o.period) : null,
@@ -440,38 +437,7 @@ const React = require("react")
     }
 
     // ——— 「📚 最近读过」历史（纯客户端 localStorage，无 host RPC） ———
-    const HISTORY_KEY = 'dsh-deepread-history-v1'
-    const HISTORY_MAX = 20
-    const HISTORY_KINDS = ['article', 'book', 'map', 'feynman', 'batch']
-
-    function historyKindAllowed(kind) {
-      return HISTORY_KINDS.indexOf(kind) !== -1
-    }
-    function readHistory() {
-      if (typeof localStorage === 'undefined') return []
-      try {
-        const raw = localStorage.getItem(HISTORY_KEY)
-        if (raw === null || raw === '') return []
-        const parsed = JSON.parse(raw)
-        return Array.isArray(parsed) ? parsed : []
-      } catch (err) {
-        return []
-      }
-    }
-    function writeHistory(record) {
-      if (typeof localStorage === 'undefined') return
-      try {
-        const list = readHistory()
-        const idx = list.findIndex((it) => it !== null && typeof it === 'object' && it.id === record.id)
-        if (idx !== -1) list.splice(idx, 1)
-        list.unshift(record)
-        if (list.length > HISTORY_MAX) list.length = HISTORY_MAX
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(list))
-      } catch (err) {
-        // localStorage 不可用或写入失败：静默忽略
-      }
-    }
-    function relativeTime(time) {
+    function relativeTime(time: number): string {
       if (typeof time !== 'number' || !isFinite(time)) return ''
       const diff = Date.now() - time
       const minute = 60 * 1000
@@ -487,8 +453,8 @@ const React = require("react")
       const dd = String(d.getDate())
       return d.getFullYear() + '-' + (mm.length < 2 ? '0' + mm : mm) + '-' + (dd.length < 2 ? '0' + dd : dd)
     }
-    function HistoryItem(props) {
-      const item = props.item !== null && typeof props.item === 'object' ? props.item : {}
+    function HistoryItem(props: { readonly item: HistoryRecord; readonly onReread?: (item: HistoryRecord) => void }): React.ReactElement {
+      const item = props.item
       const [open, setOpen] = React.useState(false)
       const title = typeof item.title === 'string' ? item.title : ''
       const displayTitle = title.length > 40 ? title.slice(0, 40) + '…' : title
@@ -519,11 +485,11 @@ const React = require("react")
       )
     }
 
-    function BackgroundCard(props) {
+    function BackgroundCard(props: { readonly value: DeepreadResult }): React.ReactElement {
       const v = props.value !== null && typeof props.value === 'object' ? props.value : {}
       const meta = v.meta !== null && typeof v.meta === 'object' ? v.meta : {}
-      const depthLabel = meta.depth === 'batch' ? '批量精读' : (DEPTH_LABELS[meta.depth] !== undefined ? DEPTH_LABELS[meta.depth] : null)
-      const kindLabel = KIND_LABELS[meta.sourceKind] !== undefined ? KIND_LABELS[meta.sourceKind] : null
+      const depthLabel = meta.depth === 'batch' ? '批量精读' : (typeof meta.depth === 'string' ? (DEPTH_LABELS[meta.depth] ?? null) : null)
+      const kindLabel = typeof meta.sourceKind === 'string' ? (KIND_LABELS[meta.sourceKind] ?? null) : null
       return React.createElement('div', { className: 'dr-card' },
         React.createElement('div', { className: 'dr-title' }, '⏳ 后台精读已启动'),
         React.createElement('div', { className: 'dr-badges' },
@@ -536,15 +502,15 @@ const React = require("react")
       )
     }
 
-    function DeepReadCard(props) {
-      const block = props.block
-      const value = block !== null && typeof block === 'object' && block.meta !== null && typeof block.meta === 'object' ? block.meta : null
+    export function DeepReadCard(props: ToolCallViewProps): React.ReactElement {
+      const block: UnknownRecord = isRecord(props.block) ? props.block : {}
+      const value = isRecord(block.meta) ? block.meta : null
       React.useEffect(() => {
         if (value === null) return
         if (value.kind === 'estimate') return
         if (value.kind === 'background') return
-        const meta = value.meta !== null && typeof value.meta === 'object' ? value.meta : {}
-        const est = meta.estimate !== null && typeof meta.estimate === 'object' ? meta.estimate : null
+        const meta: UnknownRecord = isRecord(value.meta) ? value.meta : {}
+        const est = isRecord(meta.estimate) ? meta.estimate : null
         if (est !== null) {
           const rate = typeof est.estTokensPerSecond === 'number' ? est.estTokensPerSecond : null
           const latency = typeof est.estLatencyPerCallMs === 'number' ? est.estLatencyPerCallMs : null
@@ -568,17 +534,17 @@ const React = require("react")
           thesis: typeof value.thesis === 'string' ? value.thesis : '',
         })
       }, [value])
-      const settled = block !== null && typeof block === 'object' && (Array.isArray(block.content) || block.meta !== undefined)
+      const settled = Array.isArray(block.content) || block.meta !== undefined
       if (!settled) {
         return React.createElement('div', { className: 'dr-card' },
           React.createElement('div', { className: 'dr-note' }, '📖 正在精读分析…（长文会自动分部分处理，请稍候）'),
         )
       }
       if (block.isError === true) {
-        const message = block.error !== null && typeof block.error === 'object' ? (block.error.name || '精读失败') : '精读失败'
+        const message = isRecord(block.error) && typeof block.error.name === 'string' ? block.error.name : '精读失败'
         return React.createElement('div', { className: 'dr-card' }, React.createElement('div', { className: 'dr-error' }, message))
       }
-      const meta = block.meta !== null && typeof block.meta === 'object' ? block.meta : null
+      const meta = isRecord(block.meta) ? block.meta : null
       if (meta === null) {
         return React.createElement('div', { className: 'dr-card' }, React.createElement('div', { className: 'dr-note' }, '精读已完成，请查看上方对话中的分析。'))
       }
@@ -588,44 +554,25 @@ const React = require("react")
       return React.createElement('div', { className: 'dr-card' }, React.createElement(Sections, { value: meta }))
     }
 
-    const store = {
-      open: false,
-      listeners: [],
-      get() { return this.open },
-      setOpen(value) {
-        this.open = value === true
-        for (const listener of this.listeners.slice()) listener()
-      },
-      subscribe(listener) {
-        this.listeners.push(listener)
-        return () => { this.listeners = this.listeners.filter((l) => l !== listener) }
-      },
+    export function ComposerButton(props: ComposerButtonProps): React.ReactElement {
+      return React.createElement('button', { type: 'button', className: 'dr-composer-btn', title: '精读助手：提取核心观点', onClick: props.openPanel }, '📖')
     }
 
-    function usePanelOpen() {
-      const [open, setOpen] = React.useState(store.get())
-      React.useEffect(() => store.subscribe(() => setOpen(store.get())), [])
-      return [open, (value) => store.setOpen(value)]
-    }
-
-    function ComposerButton() {
-      return React.createElement('button', { type: 'button', className: 'dr-composer-btn', title: '精读助手：提取核心观点', onClick: () => store.setOpen(true) }, '📖')
-    }
-
-    function Panel(props) {
-      const [open, setOpen] = usePanelOpen()
+    export function Panel(props: PanelProps): React.ReactElement | null {
+      const open = props.useStore((state) => state.open)
+      const setOpen = props.actions.setOpen
       const [url, setUrl] = React.useState('')
       const [text, setText] = React.useState('')
       const [path, setPath] = React.useState('')
       const [focus, setFocus] = React.useState('')
-      const [depth, setDepth] = React.useState('deep')
-      const [exportFmt, setExportFmt] = React.useState('none')
-      const [error, setError] = React.useState(null)
-      const [note, setNote] = React.useState(null)
-      const [history, setHistory] = React.useState([])
+      const [depth, setDepth] = React.useState<Depth>('deep')
+      const [exportFmt, setExportFmt] = React.useState<ExportFormat>('none')
+      const [error, setError] = React.useState<string | null>(null)
+      const [note, setNote] = React.useState<string | null>(null)
+      const [history, setHistory] = React.useState<HistoryRecord[]>([])
       // 预算预检结果：{ status: 'idle'|'loading'|'done'|'error', line, data }；面板内直接展示，不跳对话。
-      const [budget, setBudget] = React.useState(null)
-      const panelRef = React.useRef(null)
+      const [budget, setBudget] = React.useState<BudgetState | null>(null)
+      const panelRef = React.useRef<HTMLDivElement | null>(null)
 
       React.useEffect(() => {
         if (open) setHistory(readHistory().slice(0, 8))
@@ -682,13 +629,13 @@ const React = require("react")
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ url: url.trim(), path: path.trim(), text: text.trim() }),
           })
-          let data = null
+          let data: unknown = null
           try {
             data = await res.json()
           } catch (err) {
             data = null
           }
-          if (!res.ok || data === null || typeof data !== 'object') {
+          if (!res.ok || !isRecord(data)) {
             setBudget({ status: 'error', line: '预算预检失败：HTTP ' + res.status, data: null })
             return
           }
@@ -696,13 +643,17 @@ const React = require("react")
             setBudget({ status: 'error', line: typeof data.error === 'string' && data.error !== '' ? data.error : '预算预检失败', data: null })
             return
           }
+          if (!isBudgetSuccess(data)) {
+            setBudget({ status: 'error', line: '预算预检失败：结果格式无效', data: null })
+            return
+          }
           setBudget({ status: 'done', line: '', data })
         } catch (err) {
-          setBudget({ status: 'error', line: '预算预检失败：' + (err !== null && typeof err === 'object' && typeof err.message === 'string' ? err.message : String(err)), data: null })
+          setBudget({ status: 'error', line: '预算预检失败：' + errorMessage(err), data: null })
         }
       }
 
-      const depthOption = (value) => {
+      const depthOption = (value: Depth): React.ReactElement => {
         const full = DEPTH_LABELS[value] !== undefined ? DEPTH_LABELS[value] : value
         const est = budgetModes !== null && budgetModes[value] !== undefined ? budgetModes[value] : null
         const label = est !== null ? full + ' (' + formatTokens(est.totalTokens) + ' · ' + formatMinutes(est.minutes) + ')' : full
@@ -714,14 +665,14 @@ const React = require("react")
         }, label)
       }
 
-      const exportOption = (value, label) => React.createElement('button', {
+      const exportOption = (value: ExportFormat, label: string): React.ReactElement => React.createElement('button', {
         type: 'button',
         className: 'dr-export' + (exportFmt === value ? ' dr-export-on' : ''),
         key: value,
         onClick: () => setExportFmt(value),
       }, label)
 
-      const reread = (item) => {
+      const reread = (item: HistoryRecord): void => {
         if (item !== null && typeof item === 'object' && typeof item.source === 'string' && item.source !== '') {
           setText(item.source)
         }
@@ -740,15 +691,14 @@ const React = require("react")
       } else if (hasTarget) {
         budgetLine = '预算：链接/文件点「预算预检」立即查看'
       }
-      const budgetState = budget !== null ? budget.status : 'idle'
       let displayLine = budgetLine
       let budgetCls = 'dr-budget'
-      if (budgetState === 'loading') {
+      if (budget?.status === 'loading') {
         displayLine = budget.line
-      } else if (budgetState === 'error') {
+      } else if (budget?.status === 'error') {
         displayLine = budget.line
         budgetCls += ' dr-budget-error'
-      } else if (budgetState === 'done' && budget !== null && budget.data !== null && typeof budget.data === 'object') {
+      } else if (budget?.status === 'done') {
         const d = budget.data
         const modes = Array.isArray(d.modes) ? d.modes : []
         const row = modes.find((m) => m !== null && typeof m === 'object' && m.mode === depth) || null
@@ -770,20 +720,20 @@ const React = require("react")
           className: 'dr-input',
           placeholder: '微信公众号文章链接（mp.weixin.qq.com，需稳定链接）',
           value: url,
-          onChange: (event) => setUrl(event.target.value),
+          onChange: (event: React.ChangeEvent<HTMLInputElement>) => setUrl(event.target.value),
         }),
         React.createElement('textarea', {
           className: 'dr-input dr-textarea',
           placeholder: '或粘贴要精读的文章 / 章节内容…',
           rows: 6,
           value: text,
-          onChange: (event) => setText(event.target.value),
+          onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => setText(event.target.value),
         }),
         React.createElement('input', {
           className: 'dr-input',
           placeholder: '或填写文件路径（.txt / .md / .pdf），如 notes/第一章.md',
           value: path,
-          onChange: (event) => setPath(event.target.value),
+          onChange: (event: React.ChangeEvent<HTMLInputElement>) => setPath(event.target.value),
         }),
         React.createElement(Section, { title: '📚 最近读过', count: history.length, defaultOpen: true },
           history.length === 0 ? React.createElement('div', { className: 'dr-history-empty' }, '还没有精读记录，完成一次精读后会自动出现在这里。') : null,
@@ -812,61 +762,15 @@ const React = require("react")
           className: 'dr-input',
           placeholder: '关注重点（可选），如：论证逻辑 / 研究方法',
           value: focus,
-          onChange: (event) => setFocus(event.target.value),
+          onChange: (event: React.ChangeEvent<HTMLInputElement>) => setFocus(event.target.value),
         }),
         React.createElement('div', { className: 'dr-row' },
           React.createElement('button', { type: 'button', className: 'dr-submit', onClick: submit }, '开始精读'),
-          React.createElement('button', { type: 'button', className: 'dr-preflight', onClick: preflightBudget, disabled: budgetState === 'loading' }, '🔍 预算预检'),
+          React.createElement('button', { type: 'button', className: 'dr-preflight', onClick: preflightBudget, disabled: budget?.status === 'loading' }, '🔍 预算预检'),
         ),
         error !== null ? React.createElement('div', { className: 'dr-error' }, String(error)) : null,
         note !== null ? React.createElement('div', { className: 'dr-note' }, String(note)) : null,
       )
     }
 
-    exports.apply = function (ctx) {
-      const disposeCss = injectCss(CSS)
-      const slots = ctx.get('slots')
-      if (slots === undefined) return disposeCss
-
-      // 官方 inject 通道：ctx 全部留在 apply 闭包里，组件只收普通回调（AGENTS.md ctx discipline）。
-      // 事件处理器允许读实时快照（AGENTS.md reactive-read 规则）。
-      const submitDeepread = (instruction) => {
-        try {
-          const sessions = ctx.get('sessions')
-          const list = sessions !== null && sessions !== undefined ? sessions.list : undefined
-          if (list === null || list === undefined || typeof list.getSnapshot !== 'function') {
-            return '精读提交通道不可用，请直接对对话说：请用 deepread 精读 <内容>'
-          }
-          const snapshot = list.getSnapshot()
-          const currentId = snapshot !== null && snapshot !== undefined ? snapshot.current : undefined
-          if (currentId === undefined) return '当前没有打开的会话，请先在对话中打开一个会话'
-          const conversation = ctx.get('conversation')
-          const input = conversation !== null && conversation !== undefined ? conversation.input : undefined
-          if (input === undefined || typeof input.shell !== 'function') {
-            return '精读提交通道不可用，请直接对对话说：请用 deepread 精读 <内容>'
-          }
-          const shell = input.shell(currentId)
-          shell.setDraft(instruction)
-          shell.submit('queue')
-          return null
-        } catch (err) {
-          return err !== null && typeof err === 'object' && typeof err.message === 'string' ? err.message : String(err)
-        }
-      }
-
-      slots.inject('tool.call.toolview', () => slots.register(
-        { name: 'tool.call.toolview', key: 'deepread' },
-        (props) => React.createElement(DeepReadCard, props),
-      ))
-      slots.inject('conversation.input.left', () => slots.register(
-        { name: 'conversation.input.left', id: 'deepread-composer', order: 30, label: '精读' },
-        () => React.createElement(ComposerButton),
-      ))
-      slots.inject('shell.overlay', () => slots.register(
-        { name: 'shell.overlay', id: 'deepread-panel', order: 10, label: '精读助手面板', inject: () => ({ submitDeepread }) },
-        (props) => React.createElement(Panel, props),
-      ))
-      return disposeCss
-    }
-
-    exports.inject = ['slots', 'sessions', 'conversation']
+export { injectCss as installStyles, CSS as clientCss }
