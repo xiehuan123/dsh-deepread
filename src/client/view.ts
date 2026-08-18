@@ -4,23 +4,24 @@
 // + 输入区左侧 📖 按钮（conversation.input.left）+ 卡片式精读面板（shell.overlay）。
 import * as React from 'react'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
-import type { InjectFace, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
 import type { BudgetState, DeepreadResult, Depth, EstimateModes, EstimateRow, ExportFormat, HistoryRecord, SubmitDeepread, UnknownRecord } from './models.js'
 import { errorMessage, isBudgetSuccess, isRecord } from './models.js'
 import { historyKindAllowed, readCalibration, readHistory, writeCalibration, writeHistory } from './storage.js'
-import type { createPanelStore } from './store.js'
 
 interface ComposerInjected {
-  readonly openPanel: () => void
+  readonly hooks: { readonly panelState: ObservableSnapshot<{ readonly open: boolean }> }
+  readonly togglePanel: () => void
 }
 
-interface PanelInjected {
+interface PanelInjected extends ComposerInjected {
+  readonly closePanel: () => void
   readonly submitDeepread: SubmitDeepread
 }
 
 export type ComposerButtonProps = PropsRuntime<'conversation.input.left'> & InjectFace<ComposerInjected>
 export type PanelProps = PropsRuntime<'shell.overlay'>
-  & PropsStore<ReturnType<typeof createPanelStore>>
   & InjectFace<PanelInjected>
 
     const CSS = [
@@ -555,12 +556,21 @@ export type PanelProps = PropsRuntime<'shell.overlay'>
     }
 
     export function ComposerButton(props: ComposerButtonProps): React.ReactElement {
-      return React.createElement('button', { type: 'button', className: 'dr-composer-btn', title: '精读助手：提取核心观点', onClick: props.openPanel }, '📖')
+      const open = props.usePanelState((state) => state.open)
+      const accessibleName = open ? '关闭精读助手' : '打开精读助手'
+      return React.createElement('button', {
+        type: 'button',
+        className: 'dr-composer-btn',
+        title: accessibleName,
+        'aria-label': accessibleName,
+        'aria-expanded': open,
+        'aria-controls': 'deepread-panel',
+        onClick: props.togglePanel,
+      }, '📖')
     }
 
     export function Panel(props: PanelProps): React.ReactElement | null {
-      const open = props.useStore((state) => state.open)
-      const setOpen = props.actions.setOpen
+      const open = props.usePanelState((state) => state.open)
       const [url, setUrl] = React.useState('')
       const [text, setText] = React.useState('')
       const [path, setPath] = React.useState('')
@@ -612,7 +622,7 @@ export type PanelProps = PropsRuntime<'shell.overlay'>
         instruction += '）。\n' + target
         const failure = submitDeepread(instruction)
         if (failure !== null) { setError(failure); return }
-        setOpen(false)
+        props.closePanel()
       }
 
       // 预算预检：POST 同源 API（/api/deepread/budget）由 Host 直接抓取/读取来源并估算，
@@ -711,10 +721,10 @@ export type PanelProps = PropsRuntime<'shell.overlay'>
         budgetCls += ' dr-budget-result'
       }
 
-      return React.createElement('div', { className: 'dr-panel', ref: panelRef },
+      return React.createElement('div', { id: 'deepread-panel', className: 'dr-panel', ref: panelRef },
         React.createElement('div', { className: 'dr-panel-head' },
           React.createElement('span', null, '📖 精读助手'),
-          React.createElement('button', { type: 'button', className: 'dr-close', title: '关闭', onClick: () => setOpen(false) }, '✕'),
+          React.createElement('button', { type: 'button', className: 'dr-close', title: '关闭精读助手', 'aria-label': '关闭精读助手', onClick: props.togglePanel }, '✕'),
         ),
         React.createElement('input', {
           className: 'dr-input',

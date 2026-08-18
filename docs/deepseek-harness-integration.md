@@ -225,9 +225,9 @@ dsh --profile web --dump-config
 
 1. **Web-only 激活**：`webServer` 是 Node 硬依赖；stock headless 兼容性尚未成立。
 2. **out-of-tree tsdown 配置**：上游 preset 未发布，因此本仓库镜像其构建语义；协议变化仍需主动对照上游更新。
-3. **面板 store 归属**：面板状态由 `shell.overlay` 注册项的官方 store seat 持有；组件只消费框架提供的 `useStore/actions`，声明折叠或插件卸载时由 slot 生命周期释放实例。
+3. **面板开关状态归属**：入口是 session scope、浮层是 root scope，不能跨 scope 共享同一个 store handle。开关状态因此由 `apply` 内创建的单一 snapshot source 持有，并通过两个注册项的官方 `inject.hooks` 通道分别绑定为 `usePanelState`；两个按钮调用同一个 toggle action，声明折叠或插件卸载时由 slot renderer 释放订阅。
 4. **样式实现偏差**：当前 bundle 注入全局 CSS，且置信度标签存在字面颜色；上游现行功能组件标准是 CSS Modules + semantic tokens。暗黑模式工作应借机缩小该偏差。
-5. **集成测试边界**：`test/client-lifecycle.mjs` 在可用的上游构建上运行真实 `ClientModuleSystem` 并验证 slot/store/style 释放；完整 HMR 与视觉主题仍需在实际浏览器 profile 中复核。
+5. **集成测试边界**：`test/client-lifecycle.mjs` 在可用的上游构建上运行真实 `ClientModuleSystem` 并验证 slot/snapshot 订阅/style 释放；完整 HMR 与视觉主题仍需在实际浏览器 profile 中复核。
 
 ## 上游事实来源
 

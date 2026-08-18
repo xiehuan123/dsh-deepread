@@ -1,10 +1,9 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import { errorMessage, type SubmitDeepread } from './models.js'
-import { createPanelStore } from './store.js'
+import { createPanelState } from './store.js'
 import { ComposerButton, DeepReadCard, installStyles, clientCss, Panel } from './view.js'
 
 function submitFromContext(ctx: ClientContext): SubmitDeepread {
@@ -29,44 +28,31 @@ export const inject = ['slots', 'sessions', 'conversation'] as const
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => installStyles(clientCss), 'dsh-deepread: styles')
   const submitDeepread = submitFromContext(ctx)
-  type PanelActions = BoundActions<ReturnType<typeof createPanelStore>>
-  let panelActions: PanelActions | undefined
-  let pendingOpen = false
+  const panelState = createPanelState()
+  const panelFace = {
+    hooks: { panelState: panelState.source },
+    togglePanel: panelState.actions.togglePanel,
+  }
 
   ctx.slots.inject('shell.overlay', () => {
-    let registeredActions: PanelActions | undefined
-    const dispose = ctx.slots.register({
+    return ctx.slots.register({
       name: 'shell.overlay',
       id: 'deepread-panel',
       order: 10,
       label: '精读助手面板',
-      store: createPanelStore,
-      inject: (actions) => {
-        registeredActions = actions
-        panelActions = actions
-        if (pendingOpen) {
-          pendingOpen = false
-          actions.setOpen(true)
-        }
-        return { submitDeepread }
-      },
+      inject: () => ({
+        ...panelFace,
+        closePanel: panelState.actions.closePanel,
+        submitDeepread,
+      }),
     }, Panel)
-    return () => {
-      if (panelActions === registeredActions) panelActions = undefined
-      dispose()
-    }
   })
   ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
     name: 'conversation.input.left',
     id: 'deepread-composer',
     order: 30,
     label: '精读',
-    inject: () => ({
-      openPanel: () => {
-        if (panelActions === undefined) pendingOpen = true
-        else panelActions.setOpen(true)
-      },
-    }),
+    inject: () => panelFace,
   }, ComposerButton))
   ctx.slots.inject('tool.call.toolview', () => ctx.slots.register(
     { name: 'tool.call.toolview', key: 'deepread' },

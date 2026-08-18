@@ -1,12 +1,16 @@
-import { defineStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 
-export function createPanelStore() {
-  return defineStore({
-    init: () => ({ open: false }),
+export function createPanelState() {
+  const source = createSnapshotStore({ open: false })
+  return {
+    source,
     actions: {
-      setOpen(draft, value: boolean) {
-        draft.open = value
+      togglePanel(): void {
+        source.update((draft) => { draft.open = !draft.open })
+      },
+      closePanel(): void {
+        source.update((draft) => { draft.open = false })
       },
     },
-  })
+  }
 }
