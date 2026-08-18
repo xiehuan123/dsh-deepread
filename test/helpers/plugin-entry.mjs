@@ -65,7 +65,7 @@ export async function loadPluginEntry(root, target = 'published') {
   const packageDir = join(tempRoot, 'package')
   await mkdir(packageDir, { recursive: true })
 
-  for (const path of ['package.json', 'index.mjs']) {
+  for (const path of ['package.json']) {
     await cp(join(root, path), join(packageDir, path))
   }
   await cp(join(root, 'lib'), join(packageDir, 'lib'), { recursive: true })

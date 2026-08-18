@@ -4,20 +4,30 @@
   "version": "0.5.4",
   "license": "MIT",
   "type": "module",
-  "main": "./index.mjs",
+  "main": "./lib/types/index.js",
+  "types": "./lib/types/index.d.ts",
   "engines": {
-    "node": ">=22.0.0"
+    "node": "^22.19 || >=24"
   },
   "exports": {
-    ".": "./index.mjs",
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "import": "./lib/types/index.js"
+    },
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "scripts": {
+    "build:host": "node scripts/build-host.mjs",
     "build:client": "node scripts/build-client.mjs",
-    "prepack": "node scripts/build-client.mjs",
-    "test": "node test/compatibility-baseline.mjs && node test/smoke.mjs && node test/client-bundle.mjs && node test/budget-api.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs && node test/features.mjs && node test/pdf-stats.mjs && node test/calibration.mjs && node test/jobs-progress.mjs"
+    "build": "npm run build:host && npm run build:client",
+    "typecheck:host": "tsc --project tsconfig.host.json --noEmit",
+    "prepack": "npm run build",
+    "test": "node test/host-build.mjs && node test/host-types.mjs && node test/package-entry.mjs && node test/host-pack.mjs && node test/compatibility-baseline.mjs && node test/smoke.mjs && node test/client-bundle.mjs && node test/budget-api.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs && node test/features.mjs && node test/pdf-stats.mjs && node test/calibration.mjs && node test/jobs-progress.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
   },
   "dsh": {
     "bundle": {
@@ -70,10 +80,15 @@
     "url": "git+https://github.com/xiehuan123/dsh-deepread.git"
   },
   "files": [
-    "index.mjs",
     "lib/client.js",
+    "lib/legacy/",
+    "lib/types/",
+    "legacy/",
+    "src/index.ts",
     "src/client/index.js",
+    "scripts/build-host.mjs",
     "scripts/build-client.mjs",
+    "tsconfig.host.json",
     "test/",
     "cordis.patch.yml",
     "skills/",

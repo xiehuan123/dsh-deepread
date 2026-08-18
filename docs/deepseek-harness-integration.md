@@ -21,7 +21,8 @@ dsh plugin --profile web add <包>
   -> CLI 发现 package.json 的 dsh.bundle.patch
   -> 包名加入 profile 的 dsh.profile.bundles
   -> 启动时合并 cordis.patch.yml
-  -> 加载 index.mjs，执行 apply(ctx, config)
+  -> 加载 lib/types/index.js，执行 apply(ctx, config)
+  -> 适配入口委托给 lib/legacy/index.mjs 中的现有 Host 实现
   -> 注册 deepread 工具和 /api/deepread/budget
 
 dsh web
@@ -41,7 +42,7 @@ profile 是安装与激活范围，不是插件源码目录。删除缓存不能
 | 身份 | 当前值 | 用途 |
 | --- | --- | --- |
 | npm 包名 | `dsh-deepread` | profile 依赖、bundle 名、客户端图 id、卸载参数 |
-| Cordis 插件名 | `deepread` | `index.mjs` 导出的稳定运行时名称 |
+| Cordis 插件名 | `deepread` | `lib/types/index.js` 导出的稳定运行时名称 |
 | patch 行 id | `deepread` | `cordis.patch.yml` 中配置和覆盖这一实例的目标 |
 | 工具名 | `deepread` | 模型调用、`tool.call.toolview` 的 keyed 分发键 |
 | 客户端 bundle id | `dsh-deepread` | 必须匹配宿主客户端图中的包 id |
@@ -53,7 +54,7 @@ profile 是安装与激活范围，不是插件源码目录。删除缓存不能
 [`package.json`](../package.json) 同时声明四类信息：
 
 1. `dsh.bundle.patch` 指向 [`cordis.patch.yml`](../cordis.patch.yml)，使安装成功的依赖成为 profile patch 层。
-2. `exports["."]` 指向 [`index.mjs`](../index.mjs)，供 Cordis 加载 Node half。
+2. `main`、`types` 与 `exports["."]` 指向 `lib/types/index.js` 及其声明，供 Cordis 和 Node ESM 消费者加载 Node half。
 3. `dsh.client` 标记这是 Web 客户端包；`exports["./client"]` 指向生成的 [`lib/client.js`](../lib/client.js)。
 4. `dsh.skills` 把共享 [`SKILL.md`](../skills/dsh-deepread/SKILL.md) 暴露给 Harness 的技能发现机制。
 
@@ -72,7 +73,9 @@ Harness 依次应用：
 
 ## Node half
 
-[`index.mjs`](../index.mjs) 负责：
+[`src/index.ts`](../src/index.ts) 是严格 TypeScript 公共适配入口，由 `tsc` 构建为 `lib/types/index.js` 和声明文件。DR-110 阶段尚未迁移现有业务实现；`npm run build:host` 会把根 [`index.mjs`](../index.mjs) 复制为包内 `lib/legacy/index.mjs`，公共适配入口只转发稳定的 `name`、`Config`、`apply` 和 Cordis 激活所需的 `inject`。发布包不再包含或依赖根 `index.mjs`。
+
+当前 legacy Host 实现负责：
 
 - 声明 `Config`；
 - 注册 `deepread` 工具及其输入、运行中展示和结果渲染；
@@ -82,7 +85,7 @@ Harness 依次应用：
 
 ### Node `inject` 是激活条件
 
-`index.mjs` 导出的 `inject` 是 Cordis 服务依赖。当前列表包含 `webServer`，而 stock `headless` profile 明确不挂载 Web server，因此当前包只有在 Web-capable composition 中才会激活。代码内部虽然对 `storageDomain` 和 `jobs` 做了降级，但这不等于整个插件可在 stock `headless` profile 运行。
+公共 Host 入口转发的 `inject` 是 Cordis 服务依赖。当前列表包含 `webServer`，而 stock `headless` profile 明确不挂载 Web server，因此当前包只有在 Web-capable composition 中才会激活。代码内部虽然对 `storageDomain` 和 `jobs` 做了降级，但这不等于整个插件可在 stock `headless` profile 运行。
 
 若未来要支持 headless，应把 Web 路由与核心工具拆到不同激活面，或采用经过宿主生命周期验证的可选服务接入方式；不能简单删除 `webServer` 依赖，否则路由可能因服务时序而静默缺失。
 
@@ -155,7 +158,7 @@ Harness 的 `ui-theme` 统一拥有亮暗主题和 `--dsw-*` token，功能插�
 
 | 位置 | 值的类型 | 决定什么 |
 | --- | --- | --- |
-| `index.mjs` 的 `export const inject` | Node 服务名 | Node plugin 何时可激活 |
+| `lib/types/index.js` 转发的 `export const inject` | Node 服务名 | Node plugin 何时可激活 |
 | browser bundle 的 `exports.inject` | 浏览器 Cordis 服务名 | browser plugin 何时可激活 |
 | `package.json` 的 `dsh.client.inject` | 客户端 npm 包名 | 客户端图元数据；不负责执行排序 |
 

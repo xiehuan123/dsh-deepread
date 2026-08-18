@@ -1,9 +1,11 @@
 // 运行时自校准测试：快速 llm mock 累计滚动平均速率，estimate 反映校准；跨实例持久化。
-import { mkdtemp, mkdir, writeFile, copyFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert'
+
+import { loadBuiltHostEntry } from './helpers/built-host-entry.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const tmp = await mkdtemp(join(tmpdir(), 'dsh-deepread-calib-'))
@@ -40,8 +42,7 @@ await writeFile(join(zodDir, 'index.js'), [
   '',
 ].join('\n'))
 
-await copyFile(join(root, 'index.mjs'), join(tmp, 'index.mjs'))
-const mod = await import(pathToFileURL(join(tmp, 'index.mjs')).href)
+const mod = await loadBuiltHostEntry(root, tmp)
 
 const fakeJson = JSON.stringify({
   title: '校准测试标题',

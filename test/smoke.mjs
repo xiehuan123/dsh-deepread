@@ -1,10 +1,12 @@
 // Node half 冒烟测试：在临时目录注入 @deepseek-ai/* shim，
 // 直接调用 apply + execute，验证工具注册、callModelJson 可达、quick 路径与渲染。
-import { mkdtemp, mkdir, writeFile, copyFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert'
+
+import { loadBuiltHostEntry } from './helpers/built-host-entry.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const tmp = await mkdtemp(join(tmpdir(), 'dsh-deepread-smoke-'))
@@ -41,8 +43,7 @@ await writeFile(join(zodDir, 'index.js'), [
   '',
 ].join('\n'))
 
-await copyFile(join(root, 'index.mjs'), join(tmp, 'index.mjs'))
-const mod = await import(pathToFileURL(join(tmp, 'index.mjs')).href)
+const mod = await loadBuiltHostEntry(root, tmp)
 assert.equal(mod.name, 'deepread')
 
 const fakeJson = JSON.stringify({ title: '冒烟标题', summary: '冒烟摘要', thesis: '冒烟论点', arguments: [], quotes: [], concepts: [], questions: [] })

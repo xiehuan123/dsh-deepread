@@ -1,9 +1,11 @@
 // PDF 采样快速预检测试：extractPdfStats 直接调用 + estimate 模式采样外推。
-import { mkdtemp, mkdir, writeFile, copyFile, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert'
+
+import { loadBuiltHostEntry } from './helpers/built-host-entry.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const tmp = await mkdtemp(join(tmpdir(), 'dsh-deepread-pdfstats-'))
@@ -41,8 +43,7 @@ async function setupShims() {
     '',
   ].join('\n'))
 
-  await copyFile(join(root, 'index.mjs'), join(tmp, 'index.mjs'))
-  return await import(pathToFileURL(join(tmp, 'index.mjs')).href)
+  return loadBuiltHostEntry(root, tmp)
 }
 
 const mod = await setupShims()
