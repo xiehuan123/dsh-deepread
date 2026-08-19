@@ -283,6 +283,19 @@ export interface WebServerService {
   }): () => void
 }
 
+export interface SkillRegistration {
+  name: string
+  description: string
+  content: string
+  invocation: { modelInvocable: boolean; userInvocable: boolean }
+  source: 'bundled'
+  resourceBase: { kind: 'directory'; path: string }
+}
+
+export interface SkillsService {
+  register(skill: SkillRegistration): () => void
+}
+
 export interface HostInjectionFiber {
   dispose(): void | Promise<void>
 }
@@ -297,6 +310,7 @@ export interface HostContext {
   fs?: unknown
   llm?: unknown
   tools: { register(tool: ToolLike): () => void }
+  skills?: SkillsService
   webServer?: WebServerService
   storageDomain?: StorageDomainService
   effect(register: () => void | (() => void | Promise<void>)): void

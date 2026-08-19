@@ -1,6 +1,9 @@
 // DeepRead 精读助手 — Node half（官方 bundle 插件 Cordis entry）
 // 依赖 @deepseek-ai/* 与 zod 由宿主 profile 树提供（见 package.json peerDependencies）。
 import type { IncomingMessage } from 'node:http'
+import { readFileSync } from 'node:fs'
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
@@ -35,6 +38,7 @@ import { errorMessage, isHostContext, isRecord } from './types.js'
 
 type DataRecord = Record<string, unknown>
 const EMPTY_RECORD: DataRecord = {}
+const PACKAGED_SKILL_URL = new URL('../../../skills/dsh-deepread/SKILL.md', import.meta.url)
 type ProgressCallback = (line: string) => void
 interface PreResolved { text: string; src: SourceResult; resolveMs: number }
 interface ComputeOptions { preResolved?: PreResolved; signal?: AbortLike | null | undefined; onProgress?: ProgressCallback | undefined }
@@ -1037,6 +1041,30 @@ function applyHost(ctx: HostContext, config?: ConfigOptions): void {
 
   ctx.effect(() => ctx.tools.register(tool))
 
+  const registerPackagedSkill = (skillCtx: HostContext): void => {
+    if (skillCtx.skills === undefined) return
+    const source = readFileSync(PACKAGED_SKILL_URL, 'utf8')
+    const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/.exec(source)
+    if (frontmatter === null) throw new Error('packaged dsh-deepread skill has invalid frontmatter')
+    const metadata = frontmatter[1]
+    const content = frontmatter[2]
+    if (metadata === undefined || content === undefined) {
+      throw new Error('packaged dsh-deepread skill has invalid frontmatter')
+    }
+    const description = /^description:\s*(.+)$/m.exec(metadata)?.[1]?.trim()
+    if (description === undefined || description === '') {
+      throw new Error('packaged dsh-deepread skill has no description')
+    }
+    skillCtx.effect(() => skillCtx.skills!.register({
+      name: 'dsh-deepread',
+      description,
+      content,
+      invocation: { modelInvocable: true, userInvocable: true },
+      source: 'bundled',
+      resourceBase: { kind: 'directory', path: dirname(fileURLToPath(PACKAGED_SKILL_URL)) },
+    }))
+  }
+
   // ---------- 面板直调 API：POST /api/deepread/budget ----------
   // 精读面板「预算预检」按钮经同源 HTTP 调用本路由：Host 直接抓取/读取来源并估算，
   // 面板内显示一行结论，不再把指令发进对话。复用 resolveForEstimate（微信抓取/缓存/
@@ -1111,8 +1139,10 @@ function applyHost(ctx: HostContext, config?: ConfigOptions): void {
 
   if (typeof ctx.inject === 'function') {
     ctx.inject(['webServer'], registerBudgetRoute)
+    ctx.inject(['skills'], registerPackagedSkill)
   } else {
     registerBudgetRoute(ctx)
+    registerPackagedSkill(ctx)
   }
 }
 

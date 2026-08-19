@@ -231,6 +231,13 @@ try {
   await dispatch(header(), pointer('pointerup', 7, 'mouse', 600, 120))
   assert.equal(header().hasPointerCapture(7), false, 'pointerup releases capture')
 
+  await dispatch(header(), pointer('pointerdown', 15, 'mouse', 400, 120))
+  await dispatch(browserWindow, pointer('pointermove', 15, 'mouse', 200, 220))
+  assert.equal(panel().style.left, '180px', 'captured drag keeps moving when the pointer leaves the title element')
+  assert.equal(panel().style.top, '206px', 'window-level Pointer Events preserve the drag delta')
+  await dispatch(browserWindow, pointer('pointerup', 15, 'mouse', 200, 220))
+  assert.equal(header().hasPointerCapture(15), false, 'window pointerup releases title capture')
+
   await dispatch(header(), pointer('pointerdown', 8, 'touch', 400, 120))
   await dispatch(header(), pointer('pointermove', 8, 'touch', -1000, -1000))
   assert.equal(panel().style.left, '0px', 'touch shares the Pointer Events path and clamps left')

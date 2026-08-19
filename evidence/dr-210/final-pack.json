@@ -1,0 +1,526 @@
+[
+  {
+    "id": "dsh-deepread@1.0.0-rc.1",
+    "name": "dsh-deepread",
+    "version": "1.0.0-rc.1",
+    "size": 229394,
+    "unpackedSize": 889811,
+    "shasum": "92d2a3156869d4cf6948bbd3cc50e3794f587705",
+    "integrity": "sha512-f04g03ugwqwpE6MZoy0Gg4faMRaPImH+UrDPGNZqE5Y3Uw93ThcjFVWF+PfVHMplogsrvMbuo1HfK9wJXnbQOg==",
+    "filename": "dsh-deepread-1.0.0-rc.1.tgz",
+    "files": [
+      {
+        "path": ".claude-plugin/marketplace.json",
+        "size": 785,
+        "mode": 420
+      },
+      {
+        "path": ".claude-plugin/plugin.json",
+        "size": 792,
+        "mode": 420
+      },
+      {
+        "path": ".codex-plugin/plugin.json",
+        "size": 587,
+        "mode": 420
+      },
+      {
+        "path": "LICENSE",
+        "size": 1067,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 17602,
+        "mode": 420
+      },
+      {
+        "path": "README.zh.md",
+        "size": 15409,
+        "mode": 420
+      },
+      {
+        "path": "assets/deepread-demo.svg",
+        "size": 5308,
+        "mode": 420
+      },
+      {
+        "path": "cordis.patch.yml",
+        "size": 141,
+        "mode": 420
+      },
+      {
+        "path": "docs/community-listing-update.md",
+        "size": 1970,
+        "mode": 420
+      },
+      {
+        "path": "docs/releases/1.0.0-rc.1.md",
+        "size": 2716,
+        "mode": 420
+      },
+      {
+        "path": "docs/upgrade-and-rollback.md",
+        "size": 6500,
+        "mode": 420
+      },
+      {
+        "path": "dsh-plugin.json",
+        "size": 532,
+        "mode": 420
+      },
+      {
+        "path": "examples/ad-fact-check-knowledge-map.md",
+        "size": 4494,
+        "mode": 420
+      },
+      {
+        "path": "examples/claude-code-token-optimization.md",
+        "size": 3375,
+        "mode": 420
+      },
+      {
+        "path": "examples/README.md",
+        "size": 1799,
+        "mode": 420
+      },
+      {
+        "path": "examples/vivo-tauri-architecture.md",
+        "size": 4063,
+        "mode": 420
+      },
+      {
+        "path": "lib/client.js",
+        "size": 61503,
+        "mode": 420
+      },
+      {
+        "path": "lib/client.js.map",
+        "size": 105704,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/analysis.d.ts",
+        "size": 392,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/analysis.js",
+        "size": 1608,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/budget.d.ts",
+        "size": 561,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/budget.js",
+        "size": 4438,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/cache.d.ts",
+        "size": 312,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/cache.js",
+        "size": 3386,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/calibration.d.ts",
+        "size": 436,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/calibration.js",
+        "size": 4766,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/config.d.ts",
+        "size": 1045,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/config.js",
+        "size": 1620,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/export.d.ts",
+        "size": 1070,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/export.js",
+        "size": 47608,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/llm.d.ts",
+        "size": 1018,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/llm.js",
+        "size": 11677,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/optional-storage.d.ts",
+        "size": 282,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/optional-storage.js",
+        "size": 2083,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/pdf.d.ts",
+        "size": 792,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/pdf.js",
+        "size": 42305,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/plugin.d.ts",
+        "size": 1770,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/plugin.js",
+        "size": 70848,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/source.d.ts",
+        "size": 1116,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/source.js",
+        "size": 13854,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/types.d.ts",
+        "size": 10537,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/host/types.js",
+        "size": 1512,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/index.d.ts",
+        "size": 1713,
+        "mode": 420
+      },
+      {
+        "path": "lib/types/index.js",
+        "size": 151,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 3969,
+        "mode": 420
+      },
+      {
+        "path": "plugin.json",
+        "size": 820,
+        "mode": 420
+      },
+      {
+        "path": "scripts/build-host.mjs",
+        "size": 581,
+        "mode": 420
+      },
+      {
+        "path": "skills/dsh-deepread/agents/openai.yaml",
+        "size": 284,
+        "mode": 420
+      },
+      {
+        "path": "skills/dsh-deepread/references/feynman.md",
+        "size": 2774,
+        "mode": 420
+      },
+      {
+        "path": "skills/dsh-deepread/references/knowledge-map.md",
+        "size": 2161,
+        "mode": 420
+      },
+      {
+        "path": "skills/dsh-deepread/SKILL.md",
+        "size": 4777,
+        "mode": 420
+      },
+      {
+        "path": "src/client/index.ts",
+        "size": 2308,
+        "mode": 420
+      },
+      {
+        "path": "src/client/models.ts",
+        "size": 2785,
+        "mode": 420
+      },
+      {
+        "path": "src/client/storage.ts",
+        "size": 3984,
+        "mode": 420
+      },
+      {
+        "path": "src/client/store.ts",
+        "size": 735,
+        "mode": 420
+      },
+      {
+        "path": "src/client/view.ts",
+        "size": 62254,
+        "mode": 420
+      },
+      {
+        "path": "src/host/analysis.ts",
+        "size": 1828,
+        "mode": 420
+      },
+      {
+        "path": "src/host/budget.ts",
+        "size": 4469,
+        "mode": 420
+      },
+      {
+        "path": "src/host/cache.ts",
+        "size": 3277,
+        "mode": 420
+      },
+      {
+        "path": "src/host/calibration.ts",
+        "size": 4942,
+        "mode": 420
+      },
+      {
+        "path": "src/host/config.ts",
+        "size": 1676,
+        "mode": 420
+      },
+      {
+        "path": "src/host/export.ts",
+        "size": 42503,
+        "mode": 420
+      },
+      {
+        "path": "src/host/llm.ts",
+        "size": 10404,
+        "mode": 420
+      },
+      {
+        "path": "src/host/optional-storage.ts",
+        "size": 2007,
+        "mode": 420
+      },
+      {
+        "path": "src/host/pdf.ts",
+        "size": 33561,
+        "mode": 420
+      },
+      {
+        "path": "src/host/plugin.ts",
+        "size": 66682,
+        "mode": 420
+      },
+      {
+        "path": "src/host/source.ts",
+        "size": 12709,
+        "mode": 420
+      },
+      {
+        "path": "src/host/types.ts",
+        "size": 10243,
+        "mode": 420
+      },
+      {
+        "path": "src/index.ts",
+        "size": 247,
+        "mode": 420
+      },
+      {
+        "path": "test/browser-typescript-runtime.mjs",
+        "size": 1485,
+        "mode": 420
+      },
+      {
+        "path": "test/budget-api.mjs",
+        "size": 5879,
+        "mode": 420
+      },
+      {
+        "path": "test/cache-persist.mjs",
+        "size": 7788,
+        "mode": 420
+      },
+      {
+        "path": "test/calibration.mjs",
+        "size": 6304,
+        "mode": 420
+      },
+      {
+        "path": "test/client-bundle.mjs",
+        "size": 2778,
+        "mode": 420
+      },
+      {
+        "path": "test/client-drag.mjs",
+        "size": 17505,
+        "mode": 420
+      },
+      {
+        "path": "test/client-lifecycle.mjs",
+        "size": 10972,
+        "mode": 420
+      },
+      {
+        "path": "test/client-theme-contract.mjs",
+        "size": 9122,
+        "mode": 420
+      },
+      {
+        "path": "test/data-compat-cache.mjs",
+        "size": 4213,
+        "mode": 420
+      },
+      {
+        "path": "test/data-compat-stats.mjs",
+        "size": 3892,
+        "mode": 420
+      },
+      {
+        "path": "test/data-compat-web.mjs",
+        "size": 2262,
+        "mode": 420
+      },
+      {
+        "path": "test/data-identity-gate.mjs",
+        "size": 1019,
+        "mode": 420
+      },
+      {
+        "path": "test/dsh-tui-manifest.mjs",
+        "size": 1096,
+        "mode": 420
+      },
+      {
+        "path": "test/dsh-tui-pack.mjs",
+        "size": 2392,
+        "mode": 420
+      },
+      {
+        "path": "test/features.mjs",
+        "size": 6953,
+        "mode": 420
+      },
+      {
+        "path": "test/fixtures/host-consumer/index.ts",
+        "size": 440,
+        "mode": 420
+      },
+      {
+        "path": "test/fixtures/host-consumer/tsconfig.json",
+        "size": 183,
+        "mode": 420
+      },
+      {
+        "path": "test/fixtures/objstm.pdf",
+        "size": 547,
+        "mode": 420
+      },
+      {
+        "path": "test/host-build.mjs",
+        "size": 796,
+        "mode": 420
+      },
+      {
+        "path": "test/host-pack.mjs",
+        "size": 1188,
+        "mode": 420
+      },
+      {
+        "path": "test/host-types.mjs",
+        "size": 894,
+        "mode": 420
+      },
+      {
+        "path": "test/host-typescript-runtime.mjs",
+        "size": 2191,
+        "mode": 420
+      },
+      {
+        "path": "test/jobs-progress.mjs",
+        "size": 12685,
+        "mode": 420
+      },
+      {
+        "path": "test/optional-services.mjs",
+        "size": 8797,
+        "mode": 420
+      },
+      {
+        "path": "test/package-entry.mjs",
+        "size": 1226,
+        "mode": 420
+      },
+      {
+        "path": "test/packaged-skill.mjs",
+        "size": 1475,
+        "mode": 420
+      },
+      {
+        "path": "test/pdf-objstm.mjs",
+        "size": 5000,
+        "mode": 420
+      },
+      {
+        "path": "test/pdf-stats.mjs",
+        "size": 5535,
+        "mode": 420
+      },
+      {
+        "path": "test/release-docs-contract.mjs",
+        "size": 9171,
+        "mode": 420
+      },
+      {
+        "path": "test/smoke.mjs",
+        "size": 11061,
+        "mode": 420
+      },
+      {
+        "path": "tsconfig.browser.json",
+        "size": 462,
+        "mode": 420
+      },
+      {
+        "path": "tsconfig.host.json",
+        "size": 530,
+        "mode": 420
+      },
+      {
+        "path": "tsdown.config.ts",
+        "size": 743,
+        "mode": 420
+      }
+    ],
+    "entryCount": 102,
+    "bundled": []
+  }
+]

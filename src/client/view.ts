@@ -652,20 +652,46 @@ export type PanelProps = PropsRuntime<'shell.overlay'>
         setDragging(true)
       }
 
-      const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+      const moveActiveDrag = (pointerId: number, clientX: number, clientY: number): void => {
         const active = dragRef.current
-        if (active === null || active.pointerId !== event.pointerId) return
-        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+        if (active === null || active.pointerId !== pointerId) return
         const panel = panelRef.current
         const header = headerRef.current
         if (panel === null || header === null) return
         props.setPanelPosition(clampPosition(
-          active.originLeft + event.clientX - active.startX,
-          active.originTop + event.clientY - active.startY,
+          active.originLeft + clientX - active.startX,
+          active.originTop + clientY - active.startY,
           panel.getBoundingClientRect().width,
           header.getBoundingClientRect().height,
         ))
       }
+
+      const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+        moveActiveDrag(event.pointerId, event.clientX, event.clientY)
+      }
+
+      React.useEffect(() => {
+        if (!dragging) return
+        const onWindowPointerMove = (event: PointerEvent): void => {
+          const header = headerRef.current
+          if (header !== null && event.target instanceof Element && header.contains(event.target)) return
+          moveActiveDrag(event.pointerId, event.clientX, event.clientY)
+        }
+        const onWindowPointerEnd = (event: PointerEvent): void => {
+          if (dragRef.current?.pointerId !== event.pointerId) return
+          releaseActiveDrag()
+          setDragging(false)
+        }
+        window.addEventListener('pointermove', onWindowPointerMove)
+        window.addEventListener('pointerup', onWindowPointerEnd)
+        window.addEventListener('pointercancel', onWindowPointerEnd)
+        return () => {
+          window.removeEventListener('pointermove', onWindowPointerMove)
+          window.removeEventListener('pointerup', onWindowPointerEnd)
+          window.removeEventListener('pointercancel', onWindowPointerEnd)
+        }
+      }, [dragging])
 
       React.useEffect(() => {
         if (!open) return

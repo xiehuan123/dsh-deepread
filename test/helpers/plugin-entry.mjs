@@ -68,6 +68,7 @@ export async function loadPluginEntry(root, target = 'published') {
     await cp(join(root, path), join(packageDir, path))
   }
   await cp(join(root, 'lib'), join(packageDir, 'lib'), { recursive: true })
+  await cp(join(root, 'skills'), join(packageDir, 'skills'), { recursive: true })
   if (target === 'legacy-0.5.4') {
     const legacySource = execFileSync('git', ['show', `${LEGACY_054_COMMIT}:index.mjs`], { cwd: root, encoding: 'utf8' })
     await writeFile(join(packageDir, 'index.mjs'), legacySource)
