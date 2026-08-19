@@ -1,7 +1,7 @@
 {
   "name": "dsh-deepread",
-  "description": "AI deep-reading assistant: extract core claims, argument structure, and key evidence from books and articles. Five modes (quick, deep, knowledge map, Feynman, full book); knowledge-map reports include confidence levels, data facts, relation labels, Mermaid mindmaps, and recall questions. Reads WeChat article URLs, TXT/Markdown/HTML/PDF files, or pasted text (built-in pure-JS PDF extractor). Exports Markdown, FreeMind/XMind mindmaps, and HTML reports. DeepSeek Harness plugin.",
-  "version": "0.5.4",
+  "description": "AI deep-reading assistant for DeepSeek Harness and dsh-TUI: extract traceable claims, evidence, confidence levels, knowledge maps, and review questions from articles, books, PDFs, files, URLs, or pasted text.",
+  "version": "1.0.0-rc.1",
   "license": "MIT",
   "type": "module",
   "main": "./lib/types/index.js",
@@ -26,7 +26,7 @@
     "typecheck:host": "tsc --project tsconfig.host.json --noEmit",
     "typecheck:browser": "tsc --project tsconfig.browser.json --noEmit",
     "prepack": "npm run build",
-    "test": "node test/dsh-tui-manifest.mjs && node test/dsh-tui-pack.mjs && node test/host-build.mjs && node test/host-types.mjs && node test/browser-typescript-runtime.mjs && node test/client-theme-contract.mjs && node test/package-entry.mjs && node test/host-pack.mjs && node test/host-typescript-runtime.mjs && node test/compatibility-baseline.mjs && node test/data-identity-gate.mjs && node test/data-compat-web.mjs && node test/data-compat-cache.mjs && node test/data-compat-stats.mjs && node test/smoke.mjs && node test/client-bundle.mjs && node test/client-lifecycle.mjs && node test/client-drag.mjs && node test/budget-api.mjs && node test/optional-services.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs && node test/features.mjs && node test/pdf-stats.mjs && node test/calibration.mjs && node test/jobs-progress.mjs"
+    "test": "node test/dsh-tui-manifest.mjs && node test/dsh-tui-pack.mjs && node test/release-docs-contract.mjs && node test/host-build.mjs && node test/host-types.mjs && node test/browser-typescript-runtime.mjs && node test/client-theme-contract.mjs && node test/package-entry.mjs && node test/host-pack.mjs && node test/host-typescript-runtime.mjs && node test/compatibility-baseline.mjs && node test/data-identity-gate.mjs && node test/data-compat-web.mjs && node test/data-compat-cache.mjs && node test/data-compat-stats.mjs && node test/smoke.mjs && node test/client-bundle.mjs && node test/client-lifecycle.mjs && node test/client-drag.mjs && node test/budget-api.mjs && node test/optional-services.mjs && node test/pdf-objstm.mjs && node test/cache-persist.mjs && node test/features.mjs && node test/pdf-stats.mjs && node test/calibration.mjs && node test/jobs-progress.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.7",
@@ -108,6 +108,9 @@
     "plugin.json",
     "README.md",
     "README.zh.md",
+    "docs/upgrade-and-rollback.md",
+    "docs/releases/",
+    "docs/community-listing-update.md",
     "assets/",
     "LICENSE",
     "examples/"

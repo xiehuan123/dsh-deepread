@@ -13,6 +13,8 @@
 
 上游仍处于预发布阶段。修改宿主接口相关代码前，应先在本地上游重新核对文档和源码，而不是把本文当成永久不变的 API 规范。
 
+当前发布兼容基线还包括 dsh-TUI `0.8.1` / Community Consensus v0.15。包要求 Node.js `^22.19 || >=24`；同一个 tarball 在 Harness Web、Harness headless 与 dsh-TUI 中共享 Host 工具和 skill，浏览器 UI 只是 Harness Web 的可选入口。
+
 ## 一张图理解装载链路
 
 ```text
@@ -23,7 +25,7 @@ dsh plugin --profile web add <包>
   -> 启动时合并 cordis.patch.yml
   -> 加载 lib/types/index.js，执行 apply(ctx, config)
   -> 严格 TypeScript Host 模块注册工具、缓存、预算路由与生命周期资源
-  -> 注册 deepread 工具和 /api/deepread/budget
+  -> 始终注册 deepread 工具；有 webServer 时注册 /api/deepread/budget
 
 dsh web
   -> ClientModuleRegistry 扫描已激活包的 dsh.client
@@ -33,6 +35,11 @@ dsh web
   -> bundle 调用 window.__ModuleLoader__.load({ id, factory })
   -> Cordis 执行浏览器 apply(ctx)
   -> 向三个宿主 slot 注册结果卡、入口按钮和浮层面板
+
+dsh-TUI 0.8.1+
+  -> 读取 Host-only dsh-plugin.json（manifestVersion 0.15）
+  -> 从 lib/types/index.js 加载 deepread Host 工具
+  -> 发现打包 skill；不读取 Harness Web client
 ```
 
 profile 是安装与激活范围，不是插件源码目录。删除缓存不能代替 `dsh plugin --profile <name> remove dsh-deepread`。
@@ -57,6 +64,7 @@ profile 是安装与激活范围，不是插件源码目录。删除缓存不能
 2. `main`、`types` 与 `exports["."]` 指向 `lib/types/index.js` 及其声明，供 Cordis 和 Node ESM 消费者加载 Node half。
 3. `dsh.client` 标记这是 Web 客户端包；`exports["./client"]` 指向生成的 [`lib/client.js`](../lib/client.js)。
 4. `dsh.skills` 把共享 [`SKILL.md`](../skills/dsh-deepread/SKILL.md) 暴露给 Harness 的技能发现机制。
+5. [`dsh-plugin.json`](../dsh-plugin.json) 是 dsh-TUI Community Consensus v0.15 的 Host-only 准入清单，Host entry 同样指向 `lib/types/index.js`；它不替代 Harness 的 bundle patch。
 
 `files` 决定发布包实际包含什么。新增运行时文件、参考资料或生成产物后，必须同步检查它是否进入发布包。
 
@@ -80,14 +88,14 @@ Harness 依次应用：
 - 声明 `Config`；
 - 注册 `deepread` 工具及其输入、运行中展示和结果渲染；
 - 通过 `fs`、`llm`、`web`、`storageDomain`、`jobs` 等宿主能力完成读取、模型调用、缓存与后台任务；
-- 通过 `webServer` 注册 `POST /api/deepread/budget`；
+- 在可选 `webServer` 出现时注册 `POST /api/deepread/budget`；
 - 在插件释放时关闭已打开的 storage domain。
 
-### Node `inject` 是激活条件
+### Node `inject` 与可选服务
 
-公共 Host 入口转发的 `inject` 是 Cordis 服务依赖。当前列表包含 `webServer`，而 stock `headless` profile 明确不挂载 Web server，因此当前包只有在 Web-capable composition 中才会激活。代码内部虽然对 `storageDomain` 和 `jobs` 做了降级，但这不等于整个插件可在 stock `headless` profile 运行。
+公共 Host 入口转发的 `inject` 是 Cordis 激活条件。当前硬依赖仅为工具执行所需的 `fs`、`llm`、`tools`、`web`、`agentDefaultModel` 与 `sandboxPolicy`。`webServer` 是可选服务：实现通过 `ctx.inject(['webServer'], ...)` 在服务可用期间注册并释放预算 route；stock `headless` 不提供它时，Host 工具仍然激活。
 
-若未来要支持 headless，应把 Web 路由与核心工具拆到不同激活面，或采用经过宿主生命周期验证的可选服务接入方式；不能简单删除 `webServer` 依赖，否则路由可能因服务时序而静默缺失。
+`storageDomain` 与 `jobs` 同样在使用点探测。前者缺失时 URL 缓存与速度校准退化为进程内状态；后者缺失或启动失败时长任务回到前台执行。不要把这三项重新加入硬依赖列表，否则会破坏 Harness headless 和 dsh-TUI 的 Host-only 激活。
 
 ### 生命周期要求
 
@@ -95,7 +103,7 @@ Harness 依次应用：
 
 ## Browser half
 
-浏览器入口是 [`src/client/index.ts`](../src/client/index.ts)，领域模型、localStorage 边界、面板 store 与视图分别位于同目录模块。[`tsdown.config.ts`](../tsdown.config.ts) 使用上游当前 `clientBundle` 相同的 browser/CJS 与 banner/intro/footer 语义生成 C6 factory bundle：
+浏览器入口是 [`src/client/index.ts`](../src/client/index.ts)，领域模型、localStorage 边界、面板 store 与视图分别位于同目录模块。[`tsdown.config.ts`](../tsdown.config.ts) 使用上游当前 `clientBundle` 相同的 browser/CJS 与 banner/intro/footer 语义生成 C6 factory bundle。`lib/client.js` 是可选的 DeepSeek Harness Web 入口，不是 dsh-TUI v0.15 client facet：
 
 ```js
 window.__ModuleLoader__.load({
@@ -169,11 +177,14 @@ Harness 的 `ui-theme` 统一拥有亮暗主题和 `--dsw-*` token，功能插�
 ### 仓库内快速验证
 
 ```sh
-npm run build:client
+npm run typecheck:host
+npm run typecheck:browser
+npm run build
 npm test
+npm pack --dry-run --json
 ```
 
-当前测试覆盖 Node 工具主路径、缓存、预算 API、PDF、后台进度、client C6 handoff 和三个 slot 注册。它们使用 shim 和伪造 ctx，不证明真实 profile 解析、真实 slot 声明生命周期、HMR 或浏览器视觉效果。
+当前测试覆盖 Node 工具主路径、缓存、预算 API、PDF、后台进度、client C6 handoff、三个 slot 注册、v0.15 manifest、旧数据双向兼容与发布文档/tarball 契约。它们使用 shim 和伪造 ctx，不证明真实 profile 解析、真实 slot 声明生命周期、HMR、浏览器视觉效果或 dsh-TUI TTY 行为。
 
 ### 真实宿主验证
 
@@ -223,10 +234,10 @@ dsh --profile web --dump-config
 
 以下是升级或处理相关 issue 时应优先复核的点，不代表它们现在一定导致故障：
 
-1. **Web-only 激活**：`webServer` 是 Node 硬依赖；stock headless 兼容性尚未成立。
+1. **可选服务时序**：`webServer`、`storageDomain` 与 `jobs` 不得重新进入 Node 硬依赖；升级宿主时要复核 `ctx.inject` 的 late-add/dispose 行为和 headless 降级测试。
 2. **out-of-tree tsdown 配置**：上游 preset 未发布，因此本仓库镜像其构建语义；协议变化仍需主动对照上游更新。
 3. **面板开关状态归属**：入口是 session scope、浮层是 root scope，不能跨 scope 共享同一个 store handle。开关状态因此由 `apply` 内创建的单一 snapshot source 持有，并通过两个注册项的官方 `inject.hooks` 通道分别绑定为 `usePanelState`；两个按钮调用同一个 toggle action，声明折叠或插件卸载时由 slot renderer 释放订阅。
-4. **样式实现偏差**：当前 bundle 注入全局 CSS，且置信度标签存在字面颜色；上游现行功能组件标准是 CSS Modules + semantic tokens。暗黑模式工作应借机缩小该偏差。
+4. **主题契约**：当前文字、背景、边框、焦点和置信度状态都消费 `--dsw-alias-*` semantic tokens。升级宿主或调整样式时必须保持 `test/client-theme-contract.mjs` 绿色，并在真实 Web light/dark 主题下复核对比度。
 5. **集成测试边界**：`test/client-lifecycle.mjs` 在可用的上游构建上运行真实 `ClientModuleSystem` 并验证 slot/snapshot 订阅/style 释放；完整 HMR 与视觉主题仍需在实际浏览器 profile 中复核。
 
 ## 上游事实来源

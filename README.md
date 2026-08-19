@@ -15,7 +15,7 @@ English | [中文](README.zh.md)
 DeepRead is available in two compatible forms:
 
 - **Portable Agent Skill** for Codex, Claude Code, and other Agent Skills-compatible tools. Zero runtime dependencies; the agent follows the evidence-first reading workflow with its own file and web tools.
-- **Full DeepSeek Harness plugin** with a `deepread` tool, browser UI, PDF extraction, background jobs, progress updates, batch comparison, cost preview, and HTML/XMind-compatible export.
+- **Host plugin package** for DeepSeek Harness Web/headless and dsh-TUI, with a `deepread` tool, PDF extraction, optional persistence/jobs/Web route, batch comparison, cost preview, and HTML/XMind-compatible export. Its browser client is an optional Web-only entry.
 
 ## Quick start
 
@@ -83,24 +83,43 @@ One-line picker: in a hurry, `quick`; read one article thoroughly, `deep`; cite 
 
 ## Installation
 
+DeepRead `1.0.0-rc.1` requires Node.js **22.19 or 24 and higher** (`^22.19 || >=24`). The same npm package exposes the TypeScript Host entry at `lib/types/index.js`, the dsh-TUI Community Consensus v0.15 manifest at `dsh-plugin.json`, and an optional DeepSeek Harness Web client at `lib/client.js`.
+
+### Host compatibility
+
+| Host | Node `deepread` tool | Web client | Packaged skill | Degraded behavior |
+| --- | --- | --- | --- | --- |
+| DeepSeek Harness Web `0.1.0-rc.7` | Supported | Web UI loaded | Available | None |
+| DeepSeek Harness headless `0.1.0-rc.7` | Supported | Web client not loaded | Available | No budget HTTP route |
+| dsh-TUI `0.8.1` minimum / Community Consensus `v0.15` | Supported | Web client not loaded | Available | No Web route or browser UI |
+| Custom composition without `storageDomain` | Supported | Depends on Web services | Available | URL cache and Host calibration use in-process state |
+
+Before replacing `0.5.4`, read the [Upgrade and rollback guide](docs/upgrade-and-rollback.md), including the browser-origin and `DSH_HOME` retention conditions. The [Draft release notes](docs/releases/1.0.0-rc.1.md) describe the compatibility changes without claiming the prerelease is published.
+
 ### DeepSeek Harness (tool + Web UI, full functionality)
 
-Requires **pnpm** on the machine (`dsh plugin` runs pnpm underneath to install plugins) and Node.js ≥ 22.
+Requires **pnpm** on the machine (`dsh plugin` runs pnpm underneath to install plugins).
+
+The unpinned npm command resolves to the currently published stable release. After DR-210 publishes the npm prerelease and creates the matching tag, the pinned rc commands below become available.
 
 ```sh
-# From npm (prebuilt, no build authorization needed)
+# Currently published stable release
 dsh plugin --profile web add dsh-deepread
 
-# Pin a version
-dsh plugin --profile web add dsh-deepread@^0.5.4
+# After the npm prerelease is published
+dsh plugin --profile web add dsh-deepread@1.0.0-rc.1
 
-# From GitHub (source; build artifacts are committed)
-dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v0.5.4"
+# After the v1.0.0-rc.1 GitHub tag exists
+dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v1.0.0-rc.1"
 ```
 
 Restart `dsh web` for it to take effect. A 📖 shortcut button appears next to the input area; click it to open the card-style reading panel. You can also just say: "Read this article in knowledge-map mode: <content>".
 
 > Tip: fetching WeChat article URLs needs an HTTP provider. If you see "web fetch service unavailable" after install, mount `@deepseek-ai/dsh-web-fetch-http` in the profile's `cordis.patch.yml` and give it a browser User-Agent (WeChat serves an anti-bot verification page).
+
+### dsh-TUI (Host tool + skill)
+
+After the prerelease is published, dsh-TUI `0.8.1` or newer can install the npm package spec `dsh-deepread@1.0.0-rc.1` through the host's plugin installer. The installer reads the packaged `dsh-plugin.json` v0.15 manifest and loads `lib/types/index.js`; it does not load `lib/client.js`.
 
 ### Codex / Claude Code (skill form, zero dependencies)
 
@@ -153,11 +172,15 @@ Quickly summarize this article: <paste text>
 ```
 ├── package.json            # dsh.bundle + dsh.client + dsh.skills
 ├── cordis.patch.yml        # inserts itself into the composition
-├── index.mjs               # Node half: Cordis entry (deepread tool + PDF/HTML parsing + three export formats)
+├── dsh-plugin.json         # dsh-TUI Community Consensus v0.15 Host-only manifest
+├── src/index.ts            # TypeScript Cordis Host entry
+├── src/host/**/*.ts        # Typed Host pipeline, optional services, storage, and exports
 ├── src/client/**/*.ts      # Typed client models, storage, store, views, and slot entry
 ├── tsdown.config.ts        # official lazy-CJS module build semantics for lib/client.js
+├── lib/types/index.js      # generated Host runtime package entry
 ├── lib/client.js           # Client half (generated): __ModuleLoader__.load({ id, factory })
-├── test/                   # smoke tests: Node tool pipeline + client factory-bundle contract
+├── docs/                   # integration, upgrade/rollback, and release documentation
+├── test/                   # Host, browser, compatibility, manifest, and package contracts
 ├── assets/                 # README and showcase visuals
 ├── skills/dsh-deepread/    # Codex / Claude Code compatible skill (SKILL.md + references + agents/openai.yaml)
 ├── plugin.json             # Agent Plugins-compatible root manifest
@@ -177,10 +200,9 @@ Fetched article full texts are persisted following the official storageDomain co
 stored under `$DSH_HOME/storages/` and surviving process restarts. Re-reading the same article in a
 different mode (deep→map/feynman/book) reuses the cache without network access; when a fetch fails the
 cache is used as a fallback and the report says so. Default TTL is 7 days with a cap of 200 entries
-(expired entries are lazily removed on write). A custom Web composition that still satisfies the
-plugin's Node dependencies but omits `storageDomain` degrades to an in-process cache. The stock
-`headless` profile does not provide the plugin's required `webServer`, so it is not currently a
-supported activation environment.
+(expired entries are lazily removed on write). A composition that omits `storageDomain` degrades to
+an in-process cache. `webServer` is optional: Web-capable profiles register the budget route, while
+the stock `headless` profile activates the Host tool without that route or the browser client.
 
 ## Plugin configuration (Config)
 
@@ -202,8 +224,11 @@ supported activation environment.
 Before maintaining the host integration, read the [DeepSeek Harness plugin integration reference](docs/deepseek-harness-integration.md). It records profile loading, the Node/browser entry points, slot lifecycle, theme rules, and the diagnostic order.
 
 ```sh
-npm run build:client   # regenerate lib/client.js from src/client/**/*.ts
-npm test               # Node tool pipeline smoke + client factory-bundle contract tests
+npm run typecheck:host      # strict Host typecheck
+npm run typecheck:browser   # strict browser typecheck
+npm run build               # build lib/types and lib/client.js
+npm test                    # full repository contract suite
+npm pack --dry-run --json   # inspect the publishable file list and public entries
 ```
 
 ## License
