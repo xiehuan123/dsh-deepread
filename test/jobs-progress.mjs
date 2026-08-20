@@ -1,9 +1,11 @@
 // 后台任务进度透明测试：mock jobs 服务验证长文/批量转后台、进度、取消、前台降级。
-import { mkdtemp, mkdir, writeFile, copyFile, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert'
+
+import { loadBuiltHostEntry } from './helpers/built-host-entry.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const tmp = await mkdtemp(join(tmpdir(), 'dsh-deepread-jobs-'))
@@ -40,8 +42,7 @@ await writeFile(join(zodDir, 'index.js'), [
   '',
 ].join('\n'))
 
-await copyFile(join(root, 'index.mjs'), join(tmp, 'index.mjs'))
-const mod = await import(pathToFileURL(join(tmp, 'index.mjs')).href)
+const mod = await loadBuiltHostEntry(root, tmp)
 
 const sectionJson = JSON.stringify({ title: '后台精读标题', summary: '摘要', thesis: '论点', arguments: [], quotes: [], concepts: [], questions: [] })
 const delay = (ms) => new Promise((r) => setTimeout(r, ms))

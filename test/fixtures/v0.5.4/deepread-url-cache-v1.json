@@ -1,0 +1,11 @@
+{
+  "domain": "deepread_url_cache",
+  "version": 1,
+  "table": "articles",
+  "key": "https://mp.weixin.qq.com/s/dr-100-fixture",
+  "record": {
+    "url": "https://mp.weixin.qq.com/s/dr-100-fixture",
+    "text": "这是 0.5.4 URL 全文缓存的合成 fixture，仅用于兼容测试。",
+    "fetchedAt": "2099-01-01T00:00:00.000Z"
+  }
+}

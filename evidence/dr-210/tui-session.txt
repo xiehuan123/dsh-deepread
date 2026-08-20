@@ -1,0 +1,32 @@
+DR-210 real PTY evidence (sanitized excerpt)
+Date: 2026-08-19 Asia/Shanghai
+
+dsh-TUI v0.8.3
+
+/plugins
+Host Descriptor: dsh-tui v0.8.3
+facets: v1alpha1
+(no plugin footprints yet)
+The effect ledger is empty.
+
+/plugins check <installed dsh-plugin.json>
+Negotiation decision: compatible
+
+/context
+Skills · 1
+dsh-deepread
+Evidence-first deep reading for books, articles, PDFs, and document sets.
+
+Tools · 26
+deepread
+精读一本书或一篇文章，提取核心观点、论证结构与关键论据。
+
+/skills
+Failed to load the skill list
+
+Prompt: 请调用 deepread 工具精读以下粘贴文本：DR-210 只接受从真实 tarball 安装后的公共宿主入口证据。不要调用其他工具。
+Turn error · llm-deepseek: no API key for provider route "deepseek-official"
+MISSING_CREDENTIAL
+0 工具
+
+The session was exited with Ctrl-C and returned exit code 0. No PTY process was left running.

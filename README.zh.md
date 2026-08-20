@@ -3,7 +3,7 @@
 [English](README.md) | 中文
 
 > 精读一本书或一篇文章：提取核心观点、论证结构与关键论据，输出「观点—证据—数据—关系」结构化报告。
-> 官方 bundle 插件：Node half 注册 `deepread` 工具，client half 提供结果卡片与输入区精读条。
+> 同一 npm 包为 DeepSeek Harness Web/headless 与 dsh-TUI 提供 TypeScript Host 工具；浏览器结果卡片与精读面板是仅由 Web 宿主加载的可选 client 入口。
 
 [![npm version](https://img.shields.io/npm/v/dsh-deepread)](https://www.npmjs.com/package/dsh-deepread)
 [![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin)
@@ -14,7 +14,7 @@
 DeepRead 同时提供两种兼容形态：
 
 - **便携 Agent Skill**：适用于 Codex、Claude Code 及其他兼容 Agent Skills 的工具，零运行时依赖。
-- **完整 DeepSeek Harness 插件**：包含 `deepread` 工具、浏览器界面、PDF 抽取、后台任务、进度显示、批量对比、成本预估和 HTML/XMind 导出。
+- **Host 插件包**：适用于 DeepSeek Harness Web/headless 与 dsh-TUI，包含 `deepread` 工具、PDF 抽取、可选持久化/jobs/Web route、批量对比、成本预估和 HTML/XMind 导出；浏览器 client 仅供 Web 宿主按需加载。
 
 ## 快速开始
 
@@ -61,24 +61,43 @@ dsh plugin --profile web add dsh-deepread
 
 ## 安装
 
+DeepRead `1.0.0` 要求 Node.js **22.19 或 24 以上**（`^22.19 || >=24`）。同一个 npm 包暴露 TypeScript Host 入口 `lib/types/index.js`、dsh-TUI Community Consensus v0.15 清单 `dsh-plugin.json`，以及可选的 DeepSeek Harness Web client `lib/client.js`。
+
+### 宿主兼容矩阵
+
+| 宿主 | Node `deepread` 工具 | Web client | 打包 skill | 降级行为 |
+| --- | --- | --- | --- | --- |
+| DeepSeek Harness Web `0.1.0-rc.7` | 支持 | 加载浏览器 Web UI | 可用 | 无 |
+| DeepSeek Harness headless `0.1.0-rc.7` | 支持 | 不加载 Web client | 可用 | 不注册预算 HTTP route |
+| dsh-TUI `0.8.1` 最低版本 / Community Consensus `v0.15` | 支持 | 不加载 Web client | 可用 | 无 Web route、无浏览器 UI |
+| 缺少 `storageDomain` 的自定义组合 | 支持 | 取决于 Web 服务 | 可用 | URL 缓存和 Host 校准退化为进程内状态 |
+
+替换 `0.5.4` 前请先阅读[升级与回滚指南](docs/upgrade-and-rollback.md)，其中说明了浏览器 origin 与 `DSH_HOME` 的数据保留条件；[正式版说明](docs/releases/1.0.0.md)记录兼容范围与入口变化。
+
 ### DeepSeek Harness（工具 + Web UI，完整功能）
 
-需要本机已安装 **pnpm**（`dsh plugin` 命令底层调用 pnpm 安装插件）与 Node.js ≥ 22。
+需要本机已安装 **pnpm**（`dsh plugin` 命令底层调用 pnpm 安装插件）。
+
+`1.0.0` 发布后，不指定版本的命令会安装 npm 正式版；需要精确部署版本时固定为 `1.0.0`。
 
 ```sh
-# 从 npm 安装（预构建产物，无需构建授权）
+# npm 正式版（1.0.0 发布后）
 dsh plugin --profile web add dsh-deepread
 
-# 指定版本
-dsh plugin --profile web add dsh-deepread@^0.5.4
+# 固定 npm 版本（1.0.0 发布后）
+dsh plugin --profile web add dsh-deepread@1.0.0
 
-# 从 GitHub 安装（源码；构建产物已提交）
-dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v0.5.4"
+# 固定 GitHub tag（v1.0.0 创建后）
+dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v1.0.0"
 ```
 
 重启 dsh web 后生效。输入区左侧出现 📖 快捷按钮，点击弹出卡片式精读面板。对话中也可直接说「用知识地图模式精读这篇文章：<内容>」。
 
 > 提示：抓取微信公众号链接需要 HTTP provider。安装后若报「网页抓取服务不可用」，请在 profile 的 `cordis.patch.yml` 中挂载 `@deepseek-ai/dsh-web-fetch-http` 并为它配置浏览器 User-Agent（微信有反爬验证页）。
+
+### dsh-TUI（Host 工具 + skill）
+
+dsh-TUI `0.8.1` 及以上版本可通过宿主的插件安装入口安装 `dsh-deepread@1.0.0`。安装器读取包内 `dsh-plugin.json` v0.15 清单并加载 `lib/types/index.js`，不会加载 `lib/client.js`。
 
 ### Codex / Claude Code（skill 形态，零依赖）
 
@@ -131,11 +150,15 @@ npx skills@latest add xiehuan123/dsh-deepread      # 或 skills.sh
 ```
 ├── package.json            # dsh.bundle + dsh.client + dsh.skills
 ├── cordis.patch.yml        # insert 挂载自身
-├── index.mjs               # Node half：Cordis entry（deepread 工具 + PDF/HTML 解析 + 三格式导出）
-├── src/client/index.js     # Client source：结果卡片 + 输入区精读条 + 精读面板（工厂包体）
-├── scripts/build-client.mjs# 将 client source 打包为 C6 工厂包产物 lib/client.js（勿手改）
+├── dsh-plugin.json         # dsh-TUI Community Consensus v0.15 Host-only 清单
+├── src/index.ts            # TypeScript Cordis Host 入口
+├── src/host/**/*.ts        # Host 管线、可选服务、存储与导出
+├── src/client/**/*.ts      # Client 类型模型、存储、store、视图与 slot 入口
+├── tsdown.config.ts        # 按官方 lazy-CJS 模块语义生成 lib/client.js
+├── lib/types/index.js      # 生成的 Host 运行时包入口
 ├── lib/client.js           # Client half（生成产物）：__ModuleLoader__.load({ id, factory })
-├── test/                   # 冒烟测试：Node 工具链路 + client 工厂包契约
+├── docs/                   # 集成、升级/回滚与发布文档
+├── test/                   # Host、浏览器、兼容、manifest 与打包契约
 ├── skills/dsh-deepread/    # Codex / Claude Code 兼容 skill（SKILL.md + references + agents/openai.yaml）
 ├── .claude-plugin/         # Claude Code 插件清单（plugin.json + marketplace.json）
 └── .codex-plugin/          # Codex 插件清单（plugin.json）
@@ -150,8 +173,9 @@ npx skills@latest add xiehuan123/dsh-deepread      # 或 skills.sh
 URL 抓取的全文按官方 storageDomain 约定落盘：`deepread_url_cache` 领域（版本 1，zod schema
 校验，记录含 `url`/`text`/`fetchedAt`），存于 `$DSH_HOME/storages/`，跨进程重启仍然有效。
 同一篇文章换模式（deep→map/feynman/book）直接复用缓存、不再联网；抓取失败时自动回退缓存并
-在报告中注明。TTL 默认 7 天，条目上限 200（写入时惰性清理过期项）。未挂载 storage 的
-profile（如无 web 组合包的 headless）自动降级为进程内缓存。
+在报告中注明。TTL 默认 7 天，条目上限 200（写入时惰性清理过期项）。未挂载
+`storageDomain` 的组合会降级为进程内缓存。`webServer` 是可选能力：Web-capable profile
+会注册预算 route；stock `headless` profile 仍会激活 Host 工具，但没有该 route 和浏览器 client。
 
 ## 插件配置（Config）
 
@@ -170,9 +194,14 @@ profile（如无 web 组合包的 headless）自动降级为进程内缓存。
 
 ## 开发
 
+维护宿主集成前先阅读 [DeepSeek Harness 插件集成参考](docs/deepseek-harness-integration.md)，其中记录了 profile 装载、Node/Browser 双入口、slot 生命周期、主题规则和排障顺序。
+
 ```sh
-npm run build:client   # 从 src/client/index.js 重新生成 lib/client.js
-npm test               # Node 工具链路冒烟 + client 工厂包契约测试
+npm run typecheck:host      # Host 严格类型检查
+npm run typecheck:browser   # 浏览器严格类型检查
+npm run build               # 构建 lib/types 与 lib/client.js
+npm test                    # 完整仓库契约测试
+npm pack --dry-run --json   # 核对发布文件清单与公共入口
 ```
 
 ## License

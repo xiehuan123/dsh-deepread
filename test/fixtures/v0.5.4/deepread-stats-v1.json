@@ -1,0 +1,12 @@
+{
+  "domain": "deepread_stats",
+  "version": 1,
+  "table": "stats",
+  "key": "default",
+  "record": {
+    "rateTokPerSec": 64,
+    "latencyMs": 750,
+    "calls": 12,
+    "updatedAt": "2026-01-15T08:00:00.000Z"
+  }
+}

@@ -1,11 +1,13 @@
 // 面板直调 API 测试：POST /api/deepread/budget 路由注册 + 文本/错误/方法校验。
 // 构造 fake webServer 捕获路由，fake req/res 走完整 handler；不联网（text 输入）。
-import { mkdtemp, mkdir, writeFile, copyFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { EventEmitter } from 'node:events'
 import assert from 'node:assert'
+
+import { loadBuiltHostEntry } from './helpers/built-host-entry.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const tmp = await mkdtemp(join(tmpdir(), 'dsh-deepread-budgetapi-'))
@@ -42,8 +44,7 @@ await writeFile(join(zodDir, 'index.js'), [
   '',
 ].join('\n'))
 
-await copyFile(join(root, 'index.mjs'), join(tmp, 'index.mjs'))
-const mod = await import(pathToFileURL(join(tmp, 'index.mjs')).href)
+const mod = await loadBuiltHostEntry(root, tmp)
 assert.equal(mod.name, 'deepread')
 
 // fake ctx：webServer 为 inject 硬依赖，挂在 ctx 属性上（Cordis 注入形态），捕获注册的路由。

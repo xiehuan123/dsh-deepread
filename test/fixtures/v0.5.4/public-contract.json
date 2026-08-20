@@ -1,0 +1,282 @@
+{
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "timeoutMs": { "type": "number", "defaultValue": 900000 },
+      "chunkChars": { "type": "number", "defaultValue": 6000 },
+      "maxParts": { "type": "number", "defaultValue": 20 },
+      "maxInputChars": { "type": "number", "defaultValue": 400000 },
+      "cacheEnabled": { "type": "boolean", "defaultValue": true },
+      "cacheTtlHours": { "type": "number", "defaultValue": 168 },
+      "estTokensPerSecond": { "type": "number", "defaultValue": 0 },
+      "estLatencyPerCallMs": { "type": "number", "defaultValue": 0 },
+      "backgroundMinChars": { "type": "number", "defaultValue": 9000 }
+    }
+  },
+  "defaultTimeoutMs": 900000,
+  "parameters": {
+    "url": {
+      "type": "string",
+      "description": "要精读的网页链接。仅支持微信公众号（mp.weixin.qq.com）的稳定链接；知乎/掘金等有反爬的站点不支持，请粘贴正文。与 path/text 至少提供一个。"
+    },
+    "text": {
+      "type": "string",
+      "description": "要精读的文本内容，直接粘贴。与 url/path 至少提供一个。"
+    },
+    "path": {
+      "type": "string",
+      "description": "工作区内要精读的文件路径，支持 .txt/.md/.markdown/.html 与 .pdf，如 \"notes/第一章.md\" 或 \"book.pdf\"。"
+    },
+    "depth": {
+      "type": "string",
+      "enum": ["quick", "deep", "map", "feynman", "book"],
+      "default": "deep",
+      "description": "精读模式。quick=快速抓要点；deep=深度精读（默认，长文自动分段）；map=「观点—证据—数据—关系」知识地图；feynman=费曼读书法（11 步闭环：目录→提问→分章→观点数据证据→章节导图→合上书讲解→找缺口→回原文修正→合并导图→再讲一次→间隔复习）；book=整本书分部分精读并汇总。"
+    },
+    "export": {
+      "type": "string",
+      "enum": ["none", "md", "mm", "html", "all"],
+      "default": "none",
+      "description": "导出格式。none=不落盘，仅在会话中展示（默认）；md=导出 Markdown 报告；mm=导出 FreeMind 思维导图（XMind 可导入）；html=导出网页报告；all=三种全部导出。"
+    },
+    "refresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "强制重新抓取并刷新缓存（默认 false：同一链接命中缓存时直接复用已抓取的全文，不再联网）。"
+    },
+    "focus": {
+      "type": "string",
+      "description": "读者特别关注的角度，例如\"论证逻辑\"\"研究方法\"\"与既有理论的关系\"。"
+    },
+    "language": {
+      "type": "string",
+      "enum": ["zh", "en", "auto"],
+      "default": "auto",
+      "description": "报告输出语言，默认 auto（跟随原文）。"
+    },
+    "estimate": {
+      "type": "boolean",
+      "default": false,
+      "description": "预算预检：true 时不调用模型，只返回各模式的预计调用次数、输入/输出 token 与耗时（按字数估算：中文≈0.6 token/字，拉丁≈0.25 token/字符，输出按各阶段预算计；时间=(总token÷速率)+(调用次数×单次延迟)，速率与延迟可用 Config 调整；大 PDF 采用采样外推）。"
+    },
+    "batch": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "title": { "type": "string", "description": "文档标题（可选，对比报告中用于标识）" },
+          "url": { "type": "string" },
+          "path": { "type": "string" },
+          "text": { "type": "string" },
+          "focus": { "type": "string" }
+        }
+      },
+      "description": "批量精读 2-10 篇并输出跨篇对比报告（对比主题矩阵、冲突点、互补关系与综合结论）。每篇需提供 url/path/text 之一；与 url/path/text 互斥。"
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "kind": { "type": "string", "required": true },
+      "title": { "type": "string", "required": true },
+      "summary": { "type": "string", "required": true },
+      "thesis": { "type": "string", "required": true },
+      "jobId": { "type": "string" },
+      "label": { "type": "string" },
+      "coreQuestion": { "type": "string" },
+      "coreConclusions": { "type": "array", "items": { "type": "string" } },
+      "items": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+      "dataPoints": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "value": { "type": "string" },
+            "period": { "type": "string" },
+            "subject": { "type": "string" },
+            "baseline": { "type": "string" },
+            "source": { "type": "string" },
+            "location": { "type": "string" }
+          }
+        }
+      },
+      "caveats": { "type": "array", "items": { "type": "string" } },
+      "mermaid": { "type": "string" },
+      "xmindOutline": { "type": "string" },
+      "recallQuestions": { "type": "array", "items": { "type": "string" } },
+      "toc": { "type": "array", "items": { "type": "string" } },
+      "feynmanChapters": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "index": { "type": "number" },
+            "title": { "type": "string" },
+            "points": { "type": "array" },
+            "chapterMap": { "type": "string" },
+            "explanation": { "type": "string" },
+            "gaps": { "type": "array", "items": { "type": "string" } },
+            "corrections": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      },
+      "bookMap": { "type": "string" },
+      "finalExplanation": { "type": "string" },
+      "reviewPlan": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "interval": { "type": "string" },
+            "focus": { "type": "string" },
+            "method": { "type": "string" }
+          }
+        }
+      },
+      "arguments": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "claim": { "type": "string" },
+            "evidence": { "type": "string" },
+            "quote": { "type": "string" },
+            "source": { "type": "string" }
+          }
+        }
+      },
+      "quotes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "text": { "type": "string" },
+            "context": { "type": "string" },
+            "source": { "type": "string" }
+          }
+        }
+      },
+      "concepts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "term": { "type": "string" },
+            "explanation": { "type": "string" }
+          }
+        }
+      },
+      "questions": { "type": "array", "items": { "type": "string" } },
+      "structure": { "type": "array", "items": { "type": "string" } },
+      "chapters": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "title": { "type": "string" },
+            "summary": { "type": "string" },
+            "thesis": { "type": "string" },
+            "arguments": { "type": "array" },
+            "quotes": { "type": "array" }
+          }
+        }
+      },
+      "citations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "claim": { "type": "string" },
+            "source": { "type": "string" },
+            "quote": { "type": "string" }
+          }
+        }
+      },
+      "estimate": { "type": "object", "additionalProperties": true },
+      "comparison": { "type": "object", "additionalProperties": true },
+      "stages": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "resolveMs": { "type": "number" },
+          "extractMs": { "type": "number" },
+          "llmMs": { "type": "number" },
+          "calls": { "type": "number" }
+        }
+      },
+      "meta": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "source": { "type": "string" },
+          "sourceKind": { "type": "string" },
+          "chars": { "type": "number" },
+          "chunks": { "type": "number" },
+          "depth": { "type": "string" },
+          "durationMs": { "type": "number" },
+          "note": { "type": "string" },
+          "stages": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "resolveMs": { "type": "number" },
+              "extractMs": { "type": "number" },
+              "llmMs": { "type": "number" },
+              "calls": { "type": "number" }
+            }
+          },
+          "files": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "md": { "type": "string" },
+              "mm": { "type": "string" },
+              "html": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "quickInput": "DR-100 固定的公开输入样例。",
+  "modelResult": {
+    "title": "0.5.4 基线标题",
+    "summary": "基线摘要",
+    "thesis": "基线论点",
+    "arguments": [{ "claim": "公开论点", "evidence": "公开证据", "quote": "基线引文", "source": "第 1 段" }],
+    "quotes": [{ "text": "基线引文", "context": "基线上下文", "source": "第 1 段" }],
+    "concepts": [{ "term": "兼容基线", "explanation": "冻结公开行为" }],
+    "questions": ["哪些行为必须保持兼容？"],
+    "structure": ["提出问题", "给出证据"],
+    "citations": [{ "claim": "公开论点", "source": "第 1 段", "quote": "基线引文" }]
+  },
+  "quickResult": {
+    "kind": "article",
+    "title": "0.5.4 基线标题",
+    "summary": "基线摘要",
+    "thesis": "基线论点",
+    "arguments": [{ "claim": "公开论点", "evidence": "公开证据", "quote": "基线引文", "source": "第 1 段" }],
+    "quotes": [{ "text": "基线引文", "context": "基线上下文", "source": "第 1 段" }],
+    "concepts": [{ "term": "兼容基线", "explanation": "冻结公开行为" }],
+    "questions": ["哪些行为必须保持兼容？"],
+    "structure": [],
+    "citations": [],
+    "meta": {
+      "source": "粘贴文本",
+      "sourceKind": "text",
+      "chars": 17,
+      "chunks": 1,
+      "depth": "quick"
+    }
+  }
+}

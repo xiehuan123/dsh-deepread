@@ -1,10 +1,12 @@
 // 缓存持久化端到端测试：以真实 JSON 文件模拟官方 storage 后端，
 // 验证 miss→落盘→hit（不联网）→新实例（模拟重启）仍命中→refresh 重抓→TTL=0 不缓存。
-import { mkdtemp, mkdir, writeFile, copyFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert'
+
+import { loadBuiltHostEntry } from './helpers/built-host-entry.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const tmp = await mkdtemp(join(tmpdir(), 'dsh-deepread-cache-'))
@@ -41,8 +43,7 @@ await writeFile(join(zodDir, 'index.js'), [
   '',
 ].join('\n'))
 
-await copyFile(join(root, 'index.mjs'), join(tmp, 'index.mjs'))
-const mod = await import(pathToFileURL(join(tmp, 'index.mjs')).href)
+const mod = await loadBuiltHostEntry(root, tmp)
 
 const fakeJson = JSON.stringify({ title: '缓存验证', summary: '摘要', thesis: '论点', arguments: [], quotes: [], concepts: [], questions: [] })
 const CACHE_FILE = join(tmp, 'storages', 'deepread_url_cache.json')

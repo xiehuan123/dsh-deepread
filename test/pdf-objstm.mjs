@@ -1,11 +1,13 @@
 // PDF 提取测试：ObjStm/XRef 流支持。
 // 用法：node test/pdf-objstm.mjs [额外PDF路径...]
 // 冒烟目标：test/fixtures/objstm.pdf（Root/Pages/Page/Font 全部驻留 ObjStm，xref 为 XRef 流）
-import { mkdtemp, mkdir, writeFile, copyFile, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert'
+
+import { loadBuiltHostEntry } from './helpers/built-host-entry.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const tmp = await mkdtemp(join(tmpdir(), 'dsh-deepread-pdf-'))
@@ -42,8 +44,7 @@ await writeFile(join(zodDir, 'index.js'), [
   '',
 ].join('\n'))
 
-await copyFile(join(root, 'index.mjs'), join(tmp, 'index.mjs'))
-const mod = await import(pathToFileURL(join(tmp, 'index.mjs')).href)
+const mod = await loadBuiltHostEntry(root, tmp)
 
 const fakeJson = JSON.stringify({ title: 'PDF 冒烟', summary: '摘要', thesis: '论点', arguments: [], quotes: [], concepts: [], questions: [] })
 
