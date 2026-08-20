@@ -1,7 +1,7 @@
 {
   "name": "dsh-deepread",
   "description": "AI deep-reading assistant for DeepSeek Harness and dsh-TUI: extract traceable claims, evidence, confidence levels, knowledge maps, and review questions from articles, books, PDFs, files, URLs, or pasted text.",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0",
   "license": "MIT",
   "type": "module",
   "main": "./lib/types/index.js",

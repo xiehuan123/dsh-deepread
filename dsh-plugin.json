@@ -3,7 +3,7 @@
   "manifestVersion": "0.15",
   "id": "io.github.xiehuan123.dsh-deepread",
   "name": "DeepRead",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0",
   "facets": {
     "host": {
       "entry": "./lib/types/index.js",

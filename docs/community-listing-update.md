@@ -1,20 +1,20 @@
-# Community listing update for `1.0.0-rc.1`
+# Community listing update for `1.0.0`
 
-This is a prepared metadata update for community catalog maintainers. Do not submit it until the `v1.0.0-rc.1` tag and npm prerelease exist after DR-210.
+This metadata is ready for community catalog maintainers after the `v1.0.0` tag and npm release resolve publicly.
 
 ## Listing fields
 
 | Field | Proposed value |
 | --- | --- |
 | Package | `dsh-deepread` |
-| Version | `1.0.0-rc.1` (prerelease) |
+| Version | `1.0.0` |
 | Summary | Evidence-first deep reading Host tool and packaged skill; optional DeepSeek Harness Web reading UI |
 | Repository | https://github.com/xiehuan123/dsh-deepread |
-| npm version | https://www.npmjs.com/package/dsh-deepread/v/1.0.0-rc.1 |
-| English README | https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0-rc.1/README.md |
-| Chinese README | https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0-rc.1/README.zh.md |
-| v0.15 manifest | https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0-rc.1/dsh-plugin.json |
-| Release notes | https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0-rc.1/docs/releases/1.0.0-rc.1.md |
+| npm version | https://www.npmjs.com/package/dsh-deepread/v/1.0.0 |
+| English README | https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0/README.md |
+| Chinese README | https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0/README.zh.md |
+| v0.15 manifest | https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0/dsh-plugin.json |
+| Release notes | https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0/docs/releases/1.0.0.md |
 
 ## Compatibility copy
 
@@ -24,7 +24,7 @@ DeepSeek Harness Web and headless compatibility starts at `0.1.0-rc.7`. Web load
 
 ## Submission checklist
 
-- Wait until the tag and npm URL resolve; this document does not claim they exist yet.
+- Confirm the tag and npm URL resolve before submitting this metadata.
 - Copy metadata from the tagged `package.json` and `dsh-plugin.json`, not from a working tree.
 - Keep the existing Awesome DSH Plugin project URL unless that catalog requests a version-specific link.
 - Link the upgrade guide when the catalog supports release notes or migration fields.

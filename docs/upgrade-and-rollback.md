@@ -1,4 +1,4 @@
-# Upgrade and rollback: `1.0.0-rc.1`
+# Upgrade and rollback: `1.0.0`
 
 [English](#english) | [中文](#中文)
 
@@ -11,17 +11,17 @@
 - Keep using the same browser origin if you want the Web reading history to remain visible. An origin is the complete protocol, domain, and port tuple.
 - Do not clear storage or rename storage domains as part of the upgrade.
 
-For a DeepSeek Harness profile, after the npm prerelease has been published by DR-210, install it with:
+After `1.0.0` is published, install the stable release in a DeepSeek Harness profile with:
 
 ```sh
-dsh plugin --profile <profile> add dsh-deepread@1.0.0-rc.1
+dsh plugin --profile <profile> add dsh-deepread@1.0.0
 ```
 
 Use a Web-capable profile to load the optional browser client. A headless profile loads the Host tool and packaged skill but does not load `lib/client.js` or register the budget HTTP route. dsh-TUI `0.8.1` or newer admits the same package through its Host-only Community Consensus v0.15 `dsh-plugin.json`; it does not load the DeepSeek Harness Web client.
 
 ### What is retained
 
-The rc keeps the four `0.5.4` persistence identities and record formats unchanged:
+The `1.0.0` release keeps the four `0.5.4` persistence identities and record formats unchanged:
 
 | Data | Stable identity | Retention condition |
 | --- | --- | --- |
@@ -67,17 +67,17 @@ Because all four identities and v1 record formats are unchanged, **no data conve
 - 希望继续看到 Web 最近读过时，保持同一个浏览器 origin；origin 由协议、域名和端口共同决定。
 - 升级过程中不要清理存储，也不要重命名 storage domain。
 
-DR-210 已发布 npm 预发布版后，DeepSeek Harness profile 才使用以下命令安装：
+`1.0.0` 发布后，在 DeepSeek Harness profile 中使用以下命令安装 npm 正式版：
 
 ```sh
-dsh plugin --profile <profile> add dsh-deepread@1.0.0-rc.1
+dsh plugin --profile <profile> add dsh-deepread@1.0.0
 ```
 
 Web-capable profile 会加载可选浏览器 client；headless profile 只加载 Host 工具和打包 skill，不加载 `lib/client.js`，也不注册预算 HTTP route。dsh-TUI `0.8.1` 及以上版本通过 Host-only Community Consensus v0.15 `dsh-plugin.json` 接纳同一个包，不加载 DeepSeek Harness Web client。
 
 ### 数据保留条件与例外
 
-rc 保持 `0.5.4` 的四个持久化标识和记录格式不变：
+`1.0.0` 保持 `0.5.4` 的四个持久化标识和记录格式不变：
 
 | 数据 | 稳定标识 | 保留条件 |
 | --- | --- | --- |

@@ -28,14 +28,14 @@ function markdownRows(source) {
     .filter((cells) => !cells.every((cell) => /^:?-+:?$/.test(cell)))
 }
 
-assert.equal(packageJson.version, '1.0.0-rc.1')
+assert.equal(packageJson.version, '1.0.0')
 assert.equal(packageLock.version, packageJson.version)
 assert.equal(packageLock.packages[''].version, packageJson.version)
 assert.equal(manifest.version, packageJson.version)
 for (const agentManifest of agentPluginManifests) assert.equal(agentManifest.version, packageJson.version)
 assert.match(packageJson.scripts.test, /node test\/release-docs-contract\.mjs/)
 
-console.log('DR-200 RELEASE DOCS 1/1: public version sources agree on 1.0.0-rc.1')
+console.log('RELEASE DOCS 1/1: public version sources agree on 1.0.0')
 
 assert.equal(packageJson.engines.node, '^22.19 || >=24')
 for (const [label, source] of [['English README', readme], ['Chinese README', readmeZh]]) {
@@ -53,8 +53,8 @@ for (const [label, source] of [['English README', readme], ['Chinese README', re
   assert.ok(tui?.some((cell) => /not loaded|不加载/.test(cell)), `${label} says dsh-TUI does not load the Web client`)
   assert.match(source, /Node(?:\.js)?[^\n]*22\.19[^\n]*(?:24|higher|以上)/i, `${label} exposes the Node engine requirement`)
 }
-assert.match(readme, /After DR-210 publishes[\s\S]*dsh-deepread@1\.0\.0-rc\.1/)
-assert.match(readmeZh, /DR-210[^\n]*发布[\s\S]*dsh-deepread@1\.0\.0-rc\.1/)
+assert.match(readme, /After `1\.0\.0` is published[\s\S]*dsh-deepread@1\.0\.0/)
+assert.match(readmeZh, /`1\.0\.0` 发布后[\s\S]*dsh-deepread@1\.0\.0/)
 
 console.log('DR-200 RELEASE DOCS 2/2: bilingual compatibility matrices expose host and Node baselines')
 
@@ -72,7 +72,7 @@ assert.match(upgradeGuide, /DSH_HOME[\s\S]*different storage directory/i)
 assert.match(upgradeGuide, /clearing (?:the )?site data[\s\S]*delete/i)
 assert.ok(upgradeGuide.includes('dsh plugin --profile <profile> remove dsh-deepread'))
 assert.ok(upgradeGuide.includes('dsh plugin --profile <profile> add dsh-deepread@0.5.4'))
-assert.match(upgradeGuide, /after[\s\S]*prerelease[\s\S]*has been published[\s\S]*dsh-deepread@1\.0\.0-rc\.1/i)
+assert.match(upgradeGuide, /after `1\.0\.0` is published[\s\S]*dsh-deepread@1\.0\.0/i)
 assert.match(upgradeGuide, /no data conversion is required/i)
 assert.match(upgradeGuide, /0\.5\.4[\s\S]*DeepSeek Harness Web[\s\S]*not[\s\S]*dsh-TUI v0\.15/i)
 assert.match(readme, /\[Upgrade and rollback guide\]\(docs\/upgrade-and-rollback\.md\)/)
@@ -80,30 +80,30 @@ assert.match(readmeZh, /\[升级与回滚指南\]\(docs\/upgrade-and-rollback\.m
 
 console.log('DR-200 RELEASE DOCS 3/3: upgrade retention conditions and 0.5.4 rollback are explicit')
 
-const releaseNotesPath = 'docs/releases/1.0.0-rc.1.md'
+const releaseNotesPath = 'docs/releases/1.0.0.md'
 const releaseNotes = await readFile(join(root, releaseNotesPath), 'utf8')
 const communityUpdate = await readFile(join(root, 'docs/community-listing-update.md'), 'utf8')
 const repositoryUrl = packageJson.repository.url.replace(/^git\+/, '').replace(/\.git$/, '')
 const npmVersionUrl = `https://www.npmjs.com/package/${packageJson.name}/v/${packageJson.version}`
 
-assert.match(releaseNotes, /^# dsh-deepread 1\.0\.0-rc\.1/m)
-assert.match(releaseNotes, /draft[\s\S]*not (?:yet )?published/i)
+assert.match(releaseNotes, /^# dsh-deepread 1\.0\.0/m)
+assert.match(releaseNotes, /prepared[\s\S]*not (?:yet )?published/i)
 assert.match(releaseNotes, /Node\.js[\s\S]*\^22\.19 \|\| >=24/)
 assert.match(releaseNotes, /lib\/types\/index\.js[\s\S]*dsh-plugin\.json[\s\S]*v0\.15/)
 assert.match(releaseNotes, /Web[\s\S]*headless[\s\S]*dsh-TUI/i)
 assert.match(releaseNotes, /no data (?:migration|conversion)/i)
 assert.ok(releaseNotes.includes('../upgrade-and-rollback.md'))
-assert.match(releaseNotes, /DR-210[\s\S]*(?:pending|not complete)/i)
+assert.match(releaseNotes, /1\.0\.0-rc\.1[\s\S]*0\.5\.4/i)
 
 assert.ok(communityUpdate.includes(repositoryUrl))
 assert.ok(communityUpdate.includes(npmVersionUrl))
 assert.ok(communityUpdate.includes(`${repositoryUrl}/blob/v${packageJson.version}/dsh-plugin.json`))
 assert.match(communityUpdate, /minimum[\s\S]*dsh-TUI[\s\S]*0\.8\.1/i)
 assert.match(communityUpdate, /Host-only[\s\S]*v0\.15/i)
-assert.match(readme, /\[Draft release notes\]\(docs\/releases\/1\.0\.0-rc\.1\.md\)/)
-assert.match(readmeZh, /\[预发布说明草稿\]\(docs\/releases\/1\.0\.0-rc\.1\.md\)/)
+assert.match(readme, /\[Release notes\]\(docs\/releases\/1\.0\.0\.md\)/)
+assert.match(readmeZh, /\[正式版说明\]\(docs\/releases\/1\.0\.0\.md\)/)
 
-console.log('DR-200 RELEASE DOCS 4/4: release notes and community listing metadata are ready but unpublished')
+console.log('RELEASE DOCS 4/4: stable release notes and community listing metadata agree')
 
 const packedFiles = await npmPackFileList(root)
 for (const requiredPath of [

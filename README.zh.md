@@ -61,7 +61,7 @@ dsh plugin --profile web add dsh-deepread
 
 ## 安装
 
-DeepRead `1.0.0-rc.1` 要求 Node.js **22.19 或 24 以上**（`^22.19 || >=24`）。同一个 npm 包暴露 TypeScript Host 入口 `lib/types/index.js`、dsh-TUI Community Consensus v0.15 清单 `dsh-plugin.json`，以及可选的 DeepSeek Harness Web client `lib/client.js`。
+DeepRead `1.0.0` 要求 Node.js **22.19 或 24 以上**（`^22.19 || >=24`）。同一个 npm 包暴露 TypeScript Host 入口 `lib/types/index.js`、dsh-TUI Community Consensus v0.15 清单 `dsh-plugin.json`，以及可选的 DeepSeek Harness Web client `lib/client.js`。
 
 ### 宿主兼容矩阵
 
@@ -72,23 +72,23 @@ DeepRead `1.0.0-rc.1` 要求 Node.js **22.19 或 24 以上**（`^22.19 || >=24`�
 | dsh-TUI `0.8.1` 最低版本 / Community Consensus `v0.15` | 支持 | 不加载 Web client | 可用 | 无 Web route、无浏览器 UI |
 | 缺少 `storageDomain` 的自定义组合 | 支持 | 取决于 Web 服务 | 可用 | URL 缓存和 Host 校准退化为进程内状态 |
 
-替换 `0.5.4` 前请先阅读[升级与回滚指南](docs/upgrade-and-rollback.md)，其中说明了浏览器 origin 与 `DSH_HOME` 的数据保留条件；[预发布说明草稿](docs/releases/1.0.0-rc.1.md)只描述兼容变化，不代表已经发布。
+替换 `0.5.4` 前请先阅读[升级与回滚指南](docs/upgrade-and-rollback.md)，其中说明了浏览器 origin 与 `DSH_HOME` 的数据保留条件；[正式版说明](docs/releases/1.0.0.md)记录兼容范围与入口变化。
 
 ### DeepSeek Harness（工具 + Web UI，完整功能）
 
 需要本机已安装 **pnpm**（`dsh plugin` 命令底层调用 pnpm 安装插件）。
 
-不指定版本的 npm 命令会安装当前已发布的稳定版。DR-210 发布 npm 预发布版并创建对应 tag 后，下面两个固定 rc 的命令才可用。
+`1.0.0` 发布后，不指定版本的命令会安装 npm 正式版；需要精确部署版本时固定为 `1.0.0`。
 
 ```sh
-# 当前已发布的稳定版
+# npm 正式版（1.0.0 发布后）
 dsh plugin --profile web add dsh-deepread
 
-# npm 预发布版发布后
-dsh plugin --profile web add dsh-deepread@1.0.0-rc.1
+# 固定 npm 版本（1.0.0 发布后）
+dsh plugin --profile web add dsh-deepread@1.0.0
 
-# GitHub v1.0.0-rc.1 tag 创建后
-dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v1.0.0-rc.1"
+# 固定 GitHub tag（v1.0.0 创建后）
+dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v1.0.0"
 ```
 
 重启 dsh web 后生效。输入区左侧出现 📖 快捷按钮，点击弹出卡片式精读面板。对话中也可直接说「用知识地图模式精读这篇文章：<内容>」。
@@ -97,7 +97,7 @@ dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v1.0.0-rc.1"
 
 ### dsh-TUI（Host 工具 + skill）
 
-预发布版发布后，可在 dsh-TUI `0.8.1` 及以上版本中通过宿主的插件安装入口安装 npm 包规格 `dsh-deepread@1.0.0-rc.1`。安装器读取包内 `dsh-plugin.json` v0.15 清单并加载 `lib/types/index.js`，不会加载 `lib/client.js`。
+dsh-TUI `0.8.1` 及以上版本可通过宿主的插件安装入口安装 `dsh-deepread@1.0.0`。安装器读取包内 `dsh-plugin.json` v0.15 清单并加载 `lib/types/index.js`，不会加载 `lib/client.js`。
 
 ### Codex / Claude Code（skill 形态，零依赖）
 
