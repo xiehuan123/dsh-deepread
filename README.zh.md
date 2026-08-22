@@ -1,6 +1,6 @@
 # 📖 DeepRead 精读助手（dsh-deepread）
 
-[English](README.md) | 中文
+[中文官网](https://xiehuan123.github.io/dsh-deepread/) | [English](README.md) | 中文
 
 > 精读一本书或一篇文章：提取核心观点、论证结构与关键论据，输出「观点—证据—数据—关系」结构化报告。
 > 同一 npm 包为 DeepSeek Harness Web/headless 与 dsh-TUI 提供 TypeScript Host 工具；浏览器结果卡片与精读面板是仅由 Web 宿主加载的可选 client 入口。

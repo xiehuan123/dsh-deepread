@@ -1,6 +1,6 @@
 # 📖 DeepRead — Evidence-first reading for AI agents
 
-English | [中文](README.zh.md)
+[中文官网](https://xiehuan123.github.io/dsh-deepread/) | English | [中文](README.zh.md)
 
 > Turn long articles, books, PDFs, and document sets into traceable claims, evidence, confidence levels, knowledge maps, and review questions.
 
