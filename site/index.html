@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DeepRead 证据精读 | 让 AI 的结论回到原文核对</title>
+    <meta
+      name="description"
+      content="DeepRead 是开源中文 AI 精读工具，可将公众号文章、PDF、书籍和多篇文档整理成带原文证据、置信度、知识地图与复习问题的报告。"
+    />
+    <meta
+      name="keywords"
+      content="DeepRead,证据精读,AI精读,中文PDF精读,公众号文章精读,知识地图,费曼学习法,Codex Skill,Claude Code Skill,DeepSeek Harness"
+    />
+    <meta name="author" content="xiehuan123" />
+    <meta name="theme-color" content="#edf1ed" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111713" media="(prefers-color-scheme: dark)" />
+    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+    <link rel="canonical" href="https://xiehuan123.github.io/dsh-deepread/" />
+    <link rel="icon" href="assets/deepread-demo.svg" type="image/svg+xml" />
+    <script>
+      const requestedTheme = new URLSearchParams(window.location.search).get("theme");
+      if (requestedTheme === "dark" || requestedTheme === "light") {
+        document.documentElement.dataset.theme = requestedTheme;
+      }
+    </script>
+    <link rel="stylesheet" href="styles.css" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:site_name" content="DeepRead 证据精读" />
+    <meta property="og:title" content="DeepRead 证据精读 | 让 AI 的结论回到原文核对" />
+    <meta
+      property="og:description"
+      content="精读公众号文章、中文 PDF 和整本书，输出观点、证据、置信度、知识地图与复习问题。"
+    />
+    <meta property="og:url" content="https://xiehuan123.github.io/dsh-deepread/" />
+    <meta
+      property="og:image"
+      content="https://xiehuan123.github.io/dsh-deepread/assets/deepread-cover.jpg"
+    />
+    <meta property="og:image:width" content="1600" />
+    <meta property="og:image:height" content="680" />
+    <meta property="og:image:alt" content="DeepRead 将长文整理为可追溯的观点与证据网络" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="DeepRead 证据精读" />
+    <meta
+      name="twitter:description"
+      content="让 AI 不只总结，还能给出原文证据、置信度和引用位置。"
+    />
+    <meta
+      name="twitter:image"
+      content="https://xiehuan123.github.io/dsh-deepread/assets/deepread-cover.jpg"
+    />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://xiehuan123.github.io/dsh-deepread/#website",
+            "url": "https://xiehuan123.github.io/dsh-deepread/",
+            "name": "DeepRead 证据精读",
+            "alternateName": ["DeepRead", "dsh-deepread"],
+            "inLanguage": "zh-CN"
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://xiehuan123.github.io/dsh-deepread/#software",
+            "name": "DeepRead 证据精读",
+            "alternateName": "dsh-deepread",
+            "description": "面向 AI Agent 的开源证据优先精读工具，可将文章、PDF、书籍和文档集整理成带原文证据、置信度、知识地图与复习问题的报告。",
+            "applicationCategory": "EducationalApplication",
+            "applicationSubCategory": "AI reading assistant",
+            "operatingSystem": "Cross-platform",
+            "softwareVersion": "1.0.0",
+            "license": "https://opensource.org/license/mit",
+            "codeRepository": "https://github.com/xiehuan123/dsh-deepread",
+            "downloadUrl": "https://www.npmjs.com/package/dsh-deepread",
+            "url": "https://xiehuan123.github.io/dsh-deepread/",
+            "image": "https://xiehuan123.github.io/dsh-deepread/assets/deepread-cover.jpg",
+            "inLanguage": ["zh-CN", "en"],
+            "author": {
+              "@type": "Person",
+              "name": "xiehuan123",
+              "url": "https://github.com/xiehuan123"
+            },
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "CNY"
+            },
+            "featureList": [
+              "公众号文章与中文 PDF 精读",
+              "观点与原文证据配对",
+              "四档置信度",
+              "知识地图与 XMind 导出",
+              "费曼学习与间隔复习",
+              "多文档对比"
+            ]
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://xiehuan123.github.io/dsh-deepread/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "DeepRead 和普通 AI 摘要有什么区别？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "普通摘要主要压缩内容。DeepRead 会进一步整理观点、证据、数据、关系、置信度和原文位置，并明确标记原文没有提供证据的内容。"
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "DeepRead 支持中文 PDF 吗？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "支持带文本层的中文 PDF。完整 DeepSeek Harness 插件内置纯 JavaScript 提取器，并保留页码标记。扫描版 PDF 建议先完成 OCR。"
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "不使用 DeepSeek Harness 可以安装吗？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "可以。便携 Agent Skill 可安装到 Codex、Claude Code 和其他兼容 Agent Skills 的工具，Skill 本身没有运行时依赖。"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+
+    <header class="site-header">
+      <div class="nav-shell">
+        <a class="brand" href="#top" aria-label="DeepRead 首页">
+          <span class="brand-mark" aria-hidden="true">DR</span>
+          <span>DeepRead <small>证据精读</small></span>
+        </a>
+        <button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav">
+          菜单
+        </button>
+        <nav id="site-nav" class="site-nav" aria-label="主导航">
+          <a href="#difference">为什么不同</a>
+          <a href="#modes">五种模式</a>
+          <a href="#examples">真实案例</a>
+          <a href="#install">安装</a>
+          <a class="nav-github" href="https://github.com/xiehuan123/dsh-deepread">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section id="top" class="hero section-shell">
+        <div class="hero-copy reveal">
+          <p class="eyebrow">开源中文 AI 精读工具</p>
+          <h1>让 AI 的结论，<strong>回到原文核对</strong></h1>
+          <p class="hero-lead">精读公众号文章、PDF 和整本书，输出可追溯的观点、证据与知识地图。</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#install">立即安装</a>
+            <a class="button button-secondary" href="#examples">查看真实输出</a>
+          </div>
+        </div>
+        <figure class="hero-visual reveal">
+          <img
+            src="assets/deepread-cover.jpg"
+            width="1600"
+            height="680"
+            alt="一叠长文经过放大镜分析后，变成互相关联的观点与证据卡片"
+            fetchpriority="high"
+          />
+        </figure>
+      </section>
+
+      <div class="host-line section-shell" aria-label="兼容平台">
+        <span>Codex</span>
+        <span>Claude Code</span>
+        <span>DeepSeek Harness</span>
+        <span>dsh-TUI</span>
+      </div>
+
+      <section id="difference" class="manifesto section-shell reveal">
+        <p class="section-kicker">摘要帮你少看一点</p>
+        <h2>精读应该帮你多懂一点</h2>
+        <p class="manifesto-copy">
+          一份流畅的摘要仍可能混在一起：作者原意、原文事实、模型推断和无法确认的内容。DeepRead
+          把这些边界重新拆开，让每个重要结论都有机会回到原文接受检查。
+        </p>
+        <blockquote>
+          AI 阅读真正缺的不是更强的概括能力，而是清晰的事实边界。
+        </blockquote>
+      </section>
+
+      <section class="evidence-flow section-shell" aria-labelledby="evidence-title">
+        <div class="section-heading reveal">
+          <p class="section-kicker">证据优先</p>
+          <h2 id="evidence-title">从一堵文字墙，到一条可追溯的证据链</h2>
+        </div>
+        <div class="evidence-map reveal" role="list" aria-label="DeepRead 精读结构">
+          <div role="listitem"><strong>观点</strong><span>作者到底在主张什么</span></div>
+          <div role="listitem"><strong>证据</strong><span>这条主张依据什么</span></div>
+          <div role="listitem"><strong>数据</strong><span>单位、时间、样本与基准</span></div>
+          <div role="listitem"><strong>关系</strong><span>支持、反驳、因果与限制</span></div>
+          <div role="listitem"><strong>置信度</strong><span>事实、推断与无法确认</span></div>
+          <div role="listitem"><strong>位置</strong><span>回到页码或原文段落</span></div>
+        </div>
+      </section>
+
+      <section class="product-proof section-shell" aria-labelledby="proof-title">
+        <div class="proof-copy reveal">
+          <p class="section-kicker">真实界面</p>
+          <h2 id="proof-title">长任务有进度，开始之前有预算</h2>
+          <p>
+            完整插件会先预估不同阅读模式需要的 token 与时间。长文和大 PDF 转为后台任务后，会逐页显示解析进度、逐段显示精读进度，也可以随时取消。
+          </p>
+          <dl class="proof-list">
+            <div><dt>输入</dt><dd>公众号链接、文件路径或粘贴正文</dd></div>
+            <div><dt>输出</dt><dd>Markdown、HTML、XMind 可导入大纲</dd></div>
+            <div><dt>复读</dt><dd>链接全文缓存，换模式无需重复抓取</dd></div>
+          </dl>
+        </div>
+        <figure class="screenshot-frame reveal">
+          <picture>
+            <source srcset="assets/deepread-web-dark.jpg" media="(prefers-color-scheme: dark)" />
+            <img
+              src="assets/deepread-web-light.jpg"
+              width="1280"
+              height="720"
+              loading="lazy"
+              alt="DeepRead 在 DeepSeek Harness Web 中的阅读面板和结果界面"
+            />
+          </picture>
+          <figcaption>DeepSeek Harness Web 中的真实插件界面</figcaption>
+        </figure>
+      </section>
+
+      <section id="modes" class="modes section-shell" aria-labelledby="modes-title">
+        <div class="section-heading reveal">
+          <p class="section-kicker">按阅读目标选择</p>
+          <h2 id="modes-title">五种模式，不浪费每一次模型调用</h2>
+        </div>
+        <div class="mode-layout reveal">
+          <div class="mode-tabs" role="tablist" aria-label="阅读模式">
+            <button id="tab-quick" role="tab" aria-selected="false" aria-controls="panel-quick" tabindex="-1">快速要点 <code>quick</code></button>
+            <button id="tab-deep" role="tab" aria-selected="false" aria-controls="panel-deep" tabindex="-1">深度精读 <code>deep</code></button>
+            <button id="tab-map" role="tab" aria-selected="true" aria-controls="panel-map">知识地图 <code>map</code></button>
+            <button id="tab-feynman" role="tab" aria-selected="false" aria-controls="panel-feynman" tabindex="-1">费曼学习 <code>feynman</code></button>
+            <button id="tab-book" role="tab" aria-selected="false" aria-controls="panel-book" tabindex="-1">整本书 <code>book</code></button>
+          </div>
+          <div class="mode-panels">
+            <article id="panel-quick" role="tabpanel" aria-labelledby="tab-quick" hidden>
+              <p class="mode-use">先判断这篇内容值不值得继续读</p>
+              <h3>几分钟内抓住问题、结论和关键概念</h3>
+              <p>输出一句话总结、核心论点、主要论证、值得保留的引文和批判性问题。单次调用，适合阅读前筛选。</p>
+            </article>
+            <article id="panel-deep" role="tabpanel" aria-labelledby="tab-deep" hidden>
+              <p class="mode-use">认真读懂一篇文章</p>
+              <h3>沿着原文还原完整论证脉络</h3>
+              <p>长文自动分段，逐段整理观点、论据、引文和章节要点，最后汇总核心概念与批判性思考。</p>
+            </article>
+            <article id="panel-map" role="tabpanel" aria-labelledby="tab-map">
+              <p class="mode-use">研究、核查与引用前整理资料</p>
+              <h3>每个重要观点都和证据放在一起</h3>
+              <p>输出十类内容、关键数据表、八种关系、四档置信度、Mermaid 导图、XMind 大纲和主动回忆问题。</p>
+              <div class="confidence-grid" aria-label="四档置信度">
+                <span>作者原意</span><span>原文事实</span><span>合理推断</span><span>无法确认</span>
+              </div>
+            </article>
+            <article id="panel-feynman" role="tabpanel" aria-labelledby="tab-feynman" hidden>
+              <p class="mode-use">真正学会并能讲给别人听</p>
+              <h3>从闭卷复述中暴露理解缺口</h3>
+              <p>完成提问、分章精读、合上原文复述、自检、回原文纠错，再安排第 1、3、7、14、30 天复习。</p>
+            </article>
+            <article id="panel-book" role="tabpanel" aria-labelledby="tab-book" hidden>
+              <p class="mode-use">处理整本书和超长文档</p>
+              <h3>保留章节局部，也不丢掉全书结构</h3>
+              <p>按部分处理长文本，提取目录与章节脉络，再将分部分精读结果组装成全书总结。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="use-cases section-shell" aria-labelledby="cases-title">
+        <div class="section-heading reveal">
+          <p class="section-kicker">真实阅读场景</p>
+          <h2 id="cases-title">从收藏夹，到能继续使用的知识</h2>
+        </div>
+        <div class="case-grid reveal">
+          <article class="case case-wide">
+            <h3>公众号文章核查</h3>
+            <p>找出文章的核心主张、数据依据和隐藏前提。原文没有证据时直接标明，不替作者补答案。</p>
+          </article>
+          <article class="case case-image">
+            <img src="assets/deepread-demo.svg" width="1200" height="630" loading="lazy" alt="DeepRead 证据优先阅读流程图" />
+          </article>
+          <article class="case">
+            <h3>中文 PDF 研读</h3>
+            <p>保留页码标记，把论点、引文和数据定位回原文。</p>
+          </article>
+          <article class="case">
+            <h3>多份报告对比</h3>
+            <p>一次比较 2-10 篇材料，整理共识、冲突与互补证据。</p>
+          </article>
+          <article class="case case-accent">
+            <h3>费曼学习闭环</h3>
+            <p>从理解内容继续走到闭卷复述、查漏纠错与间隔复习。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="examples" class="examples section-shell" aria-labelledby="examples-title">
+        <div class="section-heading reveal">
+          <p class="section-kicker">仓库内可复现</p>
+          <h2 id="examples-title">先看真实输出，再决定要不要安装</h2>
+        </div>
+        <div class="example-list reveal">
+          <a href="https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0/examples/claude-code-token-optimization.md">
+            <span><strong>Claude Code Token 优化</strong><small>深度精读，论点、论据与批判性思考</small></span>
+            <b aria-hidden="true">查看</b>
+          </a>
+          <a href="https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0/examples/ad-fact-check-knowledge-map.md">
+            <span><strong>文章事实核查</strong><small>知识地图，四档置信度与关键数据表</small></span>
+            <b aria-hidden="true">查看</b>
+          </a>
+          <a href="https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0/examples/vivo-tauri-architecture.md">
+            <span><strong>vivo Tauri 架构实践</strong><small>深度精读，架构选型、数据与限制条件</small></span>
+            <b aria-hidden="true">查看</b>
+          </a>
+        </div>
+      </section>
+
+      <section id="install" class="install section-shell" aria-labelledby="install-title">
+        <div class="section-heading reveal">
+          <p class="section-kicker">两种安装形态</p>
+          <h2 id="install-title">先从一行命令开始</h2>
+        </div>
+        <div class="install-grid reveal">
+          <article class="install-primary">
+            <p class="install-label">Codex、Claude Code 与 Agent Skills</p>
+            <h3>便携 Agent Skill</h3>
+            <p>零运行时依赖。由当前 Agent 使用自己的文件与网页工具，执行同一套证据优先阅读方法。</p>
+            <div class="command-block">
+              <code>npx skills@latest add xiehuan123/dsh-deepread</code>
+              <button type="button" class="copy-button" data-copy="npx skills@latest add xiehuan123/dsh-deepread">复制命令</button>
+            </div>
+          </article>
+          <article class="install-secondary">
+            <p class="install-label">DeepSeek Harness Web</p>
+            <h3>完整插件</h3>
+            <p>增加阅读面板、PDF 提取、后台任务、进度、缓存、预算预检、批量对比和多格式导出。</p>
+            <div class="command-block">
+              <code>dsh plugin --profile web add dsh-deepread</code>
+              <button type="button" class="copy-button" data-copy="dsh plugin --profile web add dsh-deepread">复制命令</button>
+            </div>
+          </article>
+        </div>
+        <p class="copy-status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="limits section-shell reveal" aria-labelledby="limits-title">
+        <h2 id="limits-title">边界也应该说清楚</h2>
+        <div class="limits-copy">
+          <p>DeepRead 不是自动事实裁判。它帮助你看清原文说了什么、依据在哪里、还有哪些内容无法确认，最终判断仍然属于读者。</p>
+          <p>扫描版 PDF 建议先做 OCR。知乎、掘金等反爬站点建议粘贴正文。长材料建议先做预算预检。</p>
+        </div>
+      </section>
+
+      <section class="faq section-shell" aria-labelledby="faq-title">
+        <div class="section-heading reveal">
+          <p class="section-kicker">常见问题</p>
+          <h2 id="faq-title">安装前可能想知道的事</h2>
+        </div>
+        <div class="faq-list reveal">
+          <details>
+            <summary>DeepRead 和普通 AI 摘要有什么区别？</summary>
+            <p>普通摘要主要压缩内容。DeepRead 会进一步整理观点、证据、数据、关系、置信度和原文位置，并明确标记原文没有提供证据的内容。</p>
+          </details>
+          <details>
+            <summary>DeepRead 支持中文 PDF 吗？</summary>
+            <p>支持带文本层的中文 PDF。完整插件内置纯 JavaScript 提取器，并保留页码标记。扫描版 PDF 建议先完成 OCR。</p>
+          </details>
+          <details>
+            <summary>不使用 DeepSeek Harness 可以安装吗？</summary>
+            <p>可以。便携 Agent Skill 可安装到 Codex、Claude Code 和其他兼容 Agent Skills 的工具，Skill 本身没有运行时依赖。</p>
+          </details>
+          <details>
+            <summary>会自动抓取所有网页吗？</summary>
+            <p>完整插件支持微信公众号稳定链接。遇到反爬验证时需要配置 HTTP provider，或者直接粘贴正文。其他反爬站点建议粘贴文本。</p>
+          </details>
+          <details>
+            <summary>输出可以带走吗？</summary>
+            <p>可以。完整插件支持 Markdown、HTML 和 FreeMind 格式，FreeMind 文件可以导入 XMind。便携 Skill 也可以按指令导出同类成果。</p>
+          </details>
+        </div>
+      </section>
+
+      <section class="final-cta section-shell reveal">
+        <div>
+          <p class="section-kicker">拿一篇真实材料试试看</p>
+          <h2>让第一份 AI 阅读结果，经得起原文核对</h2>
+        </div>
+        <div class="final-actions">
+          <a class="button button-primary" href="#install">查看安装命令</a>
+          <a class="text-link" href="https://github.com/xiehuan123/dsh-deepread">在 GitHub 查看源码</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="section-shell footer-inner">
+        <p><strong>DeepRead 证据精读</strong><span>开源、可核对、能继续学习。</span></p>
+        <nav aria-label="页脚导航">
+          <a href="https://github.com/xiehuan123/dsh-deepread">GitHub</a>
+          <a href="https://www.npmjs.com/package/dsh-deepread">npm</a>
+          <a href="https://github.com/xiehuan123/dsh-deepread/blob/main/README.zh.md">中文文档</a>
+          <a href="https://github.com/xiehuan123/dsh-deepread/blob/main/LICENSE">MIT License</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script src="script.js" defer></script>
+  </body>
+</html>

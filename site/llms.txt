@@ -1,0 +1,41 @@
+# DeepRead 证据精读
+
+DeepRead is an open-source evidence-first reading tool for AI agents.
+DeepRead 将公众号文章、PDF、书籍和文档集整理成带原文证据、置信度、知识地图与复习问题的报告。
+
+## Canonical identity
+
+- Name: DeepRead 证据精读
+- Package: dsh-deepread
+- License: MIT
+- Repository: https://github.com/xiehuan123/dsh-deepread
+- npm: https://www.npmjs.com/package/dsh-deepread
+- Website: https://xiehuan123.github.io/dsh-deepread/
+
+## Install
+
+- Agent Skill: npx skills@latest add xiehuan123/dsh-deepread
+- DeepSeek Harness plugin: dsh plugin --profile web add dsh-deepread
+
+## Main capabilities
+
+- Read WeChat articles, text, Markdown, HTML and text-layer PDFs.
+- Pair important claims with source evidence and locations.
+- Separate author intent, source facts, reasonable inference and unverifiable content.
+- Produce knowledge maps, data tables, recall questions and XMind-compatible outlines.
+- Compare 2-10 documents for agreement, conflict and complementary evidence.
+- Support quick, deep, map, feynman and book reading modes.
+
+## Documentation and evidence
+
+- Chinese README: https://github.com/xiehuan123/dsh-deepread/blob/main/README.zh.md
+- English README: https://github.com/xiehuan123/dsh-deepread/blob/main/README.md
+- Deep example: https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0/examples/claude-code-token-optimization.md
+- Knowledge map example: https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0/examples/ad-fact-check-knowledge-map.md
+- Architecture example: https://github.com/xiehuan123/dsh-deepread/blob/v1.0.0/examples/vivo-tauri-architecture.md
+
+## Limits
+
+- Scan-only PDFs should be OCR processed first.
+- Anti-bot websites may require pasted source text.
+- DeepRead exposes evidence and uncertainty but does not replace the reader's final judgment.
