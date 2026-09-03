@@ -48,6 +48,12 @@ npx skills@latest add xiehuan123/dsh-deepread
 dsh plugin --profile web add dsh-deepread
 ```
 
+如果 pnpm 报错 `ERR_PNPM_ADDING_TO_ROOT`，请显式指定 profile workspace 后重试：
+
+```sh
+dsh plugin --profile web add -w dsh-deepread
+```
+
 ## 先看真实输出
 
 以下是由公开文章生成的完整报告，不是手写展示稿：
@@ -122,6 +128,26 @@ dsh plugin --profile web add dsh-deepread@1.0.0
 # 固定 GitHub tag（v1.0.0 创建后）
 dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v1.0.0"
 ```
+
+从 Web profile 卸载 DeepRead：
+
+```sh
+dsh plugin --profile web remove dsh-deepread
+```
+
+#### pnpm workspace 根目录兼容
+
+部分 DSH 版本会把每个 profile 创建为 pnpm workspace，却在转发 `add` 和 `remove` 时没有显式声明 workspace 根目录。受影响的 pnpm 版本会在任何 DeepRead 代码运行前停止，并报错 `ERR_PNPM_ADDING_TO_ROOT`。只需为这次失败的操作添加 `-w`（pnpm 的 `--workspace-root` 简写）后重试：
+
+```sh
+# 安装时报 ERR_PNPM_ADDING_TO_ROOT
+dsh plugin --profile web add -w dsh-deepread
+
+# 卸载时遇到同类 workspace-root 错误
+dsh plugin --profile web remove -w dsh-deepread
+```
+
+这是 profile 包管理器兼容问题，可能影响安装到该 profile 的任何 DSH 插件。请勿通过删除 pnpm 缓存或手工修改 `node_modules` 处理；应继续使用 `dsh plugin`，让它同步更新 profile 清单和 bundle 列表。
 
 重启 dsh web 后生效。输入区左侧出现 📖 快捷按钮，点击弹出卡片式精读面板。对话中也可直接说「用知识地图模式精读这篇文章：<内容>」。
 
