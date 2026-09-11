@@ -129,16 +129,16 @@ Before replacing `0.5.4`, read the [Upgrade and rollback guide](docs/upgrade-and
 
 Requires **pnpm** on the machine (`dsh plugin` runs pnpm underneath to install plugins).
 
-After `1.0.1` is published, the unpinned command installs the stable npm release. Pin `1.0.1` when an exact deployment version is required.
+The unpinned command follows the npm `latest` tag. For the validated Harness Web `0.1.2-rc.1` baseline, pin DeepRead `1.0.1`; keep DeepRead `1.0.0` on the older `0.1.0-rc.7` Web runtime. Check the current tags with `npm view dsh-deepread dist-tags`.
 
 ```sh
-# Stable npm release (after 1.0.1 is published)
+# npm latest tag
 dsh plugin --profile web add dsh-deepread
 
-# Exact npm version (after 1.0.1 is published)
+# Exact npm version
 dsh plugin --profile web add dsh-deepread@1.0.1
 
-# Exact GitHub tag (after v1.0.1 is created)
+# Exact GitHub tag
 dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v1.0.1"
 ```
 

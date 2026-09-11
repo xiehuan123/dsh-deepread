@@ -132,6 +132,16 @@ window.__ModuleLoader__.load({
 
 `test/client-platform.mjs` 拒绝旧 runtime 请求，并在本地上游可用时对照当前 platform 源码及 loader 验证。真实 Web 验证必须使用版本匹配的宿主产物：源码 checkout 的 tag 不证明磁盘上的 `lib/` 或 `dist/` 已重建。
 
+### 真实 loader 测试的版本边界
+
+`test/client-lifecycle.mjs`、`test/client-drag.mjs` 和 `test/client-platform.mjs` 的真实宿主部分目前只验证 **`0.1.2-rc.1`**，不声明支持一个开放的版本区间。它们在导入宿主模块前读取 `DSH_HARNESS_ROOT/package.json` 的版本；未设置变量时使用上面的本地上游路径。
+
+- 版本不等于 `0.1.2-rc.1`（包括 `0.1.3-alpha.1`）、版本无法读取，或所需文件缺失时，打印带宿主版本或具体缺失路径、checkout 路径和已验证版本的 `SKIP`，然后正常退出。`client-platform` 仍执行本地 bundle 的模块请求断言。
+- `SKIP` 不代表真实 loader、slot 或新版宿主兼容性已通过验证。`test/client-smoke-preflight.mjs` 覆盖这些前置检查，已纳入 `npm test`。
+- 版本与文件检查通过后，真实导入和测试失败仍直接报错；不会将实际回归转换为 `SKIP`。匹配版本号也不能证明构建产物与源码一致，运行前仍须核对或重建宿主产物。
+
+较新核心的 `ClientModuleSystem` 要求 `manifest`、`registrationTarget`、`bootstrapModule`，且已移除旧 `web-react` 包路径。本次修复采用显式版本边界；迁移测试构造参数和 renderer 路径、扩大验证范围需要另行完成真实宿主验证。
+
 ## 三个 UI slot
 
 浏览器 `apply` 通过 `ctx.slots.inject()` 等待宿主声明 slot，再通过 `slots.register()` 注册贡献：
