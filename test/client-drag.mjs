@@ -1,19 +1,20 @@
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRuntimeStub } from './helpers/client-runtime.mjs'
+import { clientSmokeHost } from './helpers/client-smoke-host.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const upstreamRoot = process.env.DSH_HARNESS_ROOT ?? '/Users/xiehuan/Desktop/project/deepseek-harness'
+const upstreamRoot = clientSmokeHost('CLIENT DRAG', [
+  'packages/client/modules/lib/types/client/system.js',
+  'packages/client/ui-slots/lib/types/index.js',
+  'packages/client/web-react/lib/types/index.js',
+])
+if (upstreamRoot === null) process.exit(0)
 const upstreamSystem = join(upstreamRoot, 'packages/client/modules/lib/types/client/system.js')
 const upstreamSlots = join(upstreamRoot, 'packages/client/ui-slots/lib/types/index.js')
 const upstreamRenderer = join(upstreamRoot, 'packages/client/web-react/lib/types/index.js')
-if (![upstreamSystem, upstreamSlots, upstreamRenderer].every(existsSync)) {
-  console.log('CLIENT DRAG SKIP: set DSH_HARNESS_ROOT to a built DeepSeek Harness checkout for the real loader/slot smoke')
-  process.exit(0)
-}
 
 const upstreamRequire = createRequire(pathToFileURL(join(upstreamRoot, 'package.json')))
 const webReactRequire = createRequire(pathToFileURL(join(upstreamRoot, 'packages/client/web-react/package.json')))

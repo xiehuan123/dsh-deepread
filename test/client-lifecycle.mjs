@@ -2,16 +2,13 @@ import assert from 'node:assert/strict'
 import { pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { existsSync } from 'node:fs'
 import { createEffectContext, createRuntimeStub, createSlotHarness } from './helpers/client-runtime.mjs'
+import { clientSmokeHost } from './helpers/client-smoke-host.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const upstreamRoot = process.env.DSH_HARNESS_ROOT ?? '/Users/xiehuan/Desktop/project/deepseek-harness'
+const upstreamRoot = clientSmokeHost('CLIENT LIFECYCLE', ['packages/client/modules/lib/types/client/system.js'])
+if (upstreamRoot === null) process.exit(0)
 const upstreamSystem = join(upstreamRoot, 'packages/client/modules/lib/types/client/system.js')
-if (!existsSync(upstreamSystem)) {
-  console.log('CLIENT LIFECYCLE SKIP: set DSH_HARNESS_ROOT to a built DeepSeek Harness checkout for the real loader smoke')
-  process.exit(0)
-}
 
 const styleNodes = []
 const documentStub = {

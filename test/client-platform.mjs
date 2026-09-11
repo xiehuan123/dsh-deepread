@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import vm from 'node:vm'
 import { createRuntimeStub } from './helpers/client-runtime.mjs'
+import { clientSmokeHost } from './helpers/client-smoke-host.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const bundle = readFileSync(join(root, 'lib/client.js'), 'utf8')
@@ -22,9 +23,12 @@ const plugin = handoff.factory((specifier) => {
 assert.equal(typeof plugin.apply, 'function')
 assert.deepEqual(requested.sort(), Object.keys(staticModules).sort())
 
-const upstreamRoot = process.env.DSH_HARNESS_ROOT ?? '/Users/xiehuan/Desktop/project/deepseek-harness'
-const systemPath = join(upstreamRoot, 'packages/client/modules/lib/types/client/system.js')
-if (existsSync(systemPath)) {
+const upstreamRoot = clientSmokeHost('CLIENT PLATFORM REAL LOADER', [
+  'packages/client/modules/lib/types/client/system.js',
+  'packages/client/web/src/platform.ts',
+])
+if (upstreamRoot !== null) {
+  const systemPath = join(upstreamRoot, 'packages/client/modules/lib/types/client/system.js')
   // Read the current upstream platform source, not an invented compatibility shim.
   const { PLATFORM_MODULES } = await import(pathToFileURL(join(upstreamRoot, 'packages/client/web/src/platform.ts')).href)
   for (const specifier of requested) assert.ok(PLATFORM_MODULES.includes(specifier), `${specifier} is an upstream platform seed`)
