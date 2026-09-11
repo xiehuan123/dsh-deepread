@@ -116,16 +116,16 @@ DeepRead `1.0.1` 要求 Node.js **22.19 或 24 以上**（`^22.19 || >=24`）。
 
 需要本机已安装 **pnpm**（`dsh plugin` 命令底层调用 pnpm 安装插件）。
 
-`1.0.1` 发布后，不指定版本的命令会安装 npm 正式版；需要精确部署版本时固定为 `1.0.1`。
+不指定版本的命令跟随 npm 的 `latest` 标签。使用已验证的 Harness Web `0.1.2-rc.1` 时，固定安装 DeepRead `1.0.1`；旧版 `0.1.0-rc.7` Web runtime 应保留 DeepRead `1.0.0`。可用 `npm view dsh-deepread dist-tags` 查询当前标签。
 
 ```sh
-# npm 正式版（1.0.1 发布后）
+# npm latest 标签
 dsh plugin --profile web add dsh-deepread
 
-# 固定 npm 版本（1.0.1 发布后）
+# 固定 npm 版本
 dsh plugin --profile web add dsh-deepread@1.0.1
 
-# 固定 GitHub tag（v1.0.1 创建后）
+# 固定 GitHub tag
 dsh plugin --profile web add "github:xiehuan123/dsh-deepread#v1.0.1"
 ```
 

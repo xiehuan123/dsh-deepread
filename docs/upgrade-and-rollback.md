@@ -11,7 +11,7 @@
 - Keep using the same browser origin if you want the Web reading history to remain visible. An origin is the complete protocol, domain, and port tuple.
 - Do not clear storage or rename storage domains as part of the upgrade.
 
-After `1.0.1` is published, install the stable release in a DeepSeek Harness profile with:
+Install the published `1.0.1` release in a DeepSeek Harness profile with:
 
 ```sh
 dsh plugin --profile <profile> add dsh-deepread@1.0.1
@@ -67,7 +67,7 @@ Because all four identities and v1 record formats are unchanged, **no data conve
 - 希望继续看到 Web 最近读过时，保持同一个浏览器 origin；origin 由协议、域名和端口共同决定。
 - 升级过程中不要清理存储，也不要重命名 storage domain。
 
-`1.0.1` 发布后，在 DeepSeek Harness profile 中使用以下命令安装 npm 正式版：
+在 DeepSeek Harness profile 中使用以下命令安装已发布的 `1.0.1`：
 
 ```sh
 dsh plugin --profile <profile> add dsh-deepread@1.0.1

@@ -53,8 +53,8 @@ for (const [label, source] of [['English README', readme], ['Chinese README', re
   assert.ok(tui?.some((cell) => /not loaded|不加载/.test(cell)), `${label} says dsh-TUI does not load the Web client`)
   assert.match(source, /Node(?:\.js)?[^\n]*22\.19[^\n]*(?:24|higher|以上)/i, `${label} exposes the Node engine requirement`)
 }
-assert.match(readme, /After `1\.0\.1` is published[\s\S]*dsh-deepread@1\.0\.1/)
-assert.match(readmeZh, /`1\.0\.1` 发布后[\s\S]*dsh-deepread@1\.0\.1/)
+assert.match(readme, /unpinned command follows the npm `latest` tag[\s\S]*dsh-deepread@1\.0\.1/)
+assert.match(readmeZh, /不指定版本的命令跟随 npm 的 `latest` 标签[\s\S]*dsh-deepread@1\.0\.1/)
 
 console.log('DR-200 RELEASE DOCS 2/2: bilingual compatibility matrices expose host and Node baselines')
 
@@ -72,7 +72,7 @@ assert.match(upgradeGuide, /DSH_HOME[\s\S]*different storage directory/i)
 assert.match(upgradeGuide, /clearing (?:the )?site data[\s\S]*delete/i)
 assert.ok(upgradeGuide.includes('dsh plugin --profile <profile> remove dsh-deepread'))
 assert.ok(upgradeGuide.includes('dsh plugin --profile <profile> add dsh-deepread@0.5.4'))
-assert.match(upgradeGuide, /after `1\.0\.1` is published[\s\S]*dsh-deepread@1\.0\.1/i)
+assert.match(upgradeGuide, /published `1\.0\.1` release[\s\S]*dsh-deepread@1\.0\.1/i)
 assert.match(upgradeGuide, /no data conversion is required/i)
 assert.match(upgradeGuide, /0\.5\.4[\s\S]*DeepSeek Harness Web[\s\S]*not[\s\S]*dsh-TUI v0\.15/i)
 assert.match(readme, /\[Upgrade and rollback guide\]\(docs\/upgrade-and-rollback\.md\)/)
